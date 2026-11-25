@@ -1,0 +1,33 @@
+{
+  "name": "kio-sbs-bk",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "KIO SBS — 2 Workers Express + GraphQL sobre Cloudflare D1 (api + sync)",
+  "scripts": {
+    "dev:api": "wrangler dev -c wrangler.api.jsonc --port 8797 --inspector-port 9237",
+    "dev:sync": "wrangler dev -c wrangler.sync.jsonc --port 8798 --inspector-port 9238",
+    "dev": "npm run db:migrate && (npm run dev:api & npm run dev:sync & wait)",
+    "seed:dev": "bash scripts/dev-seed.sh",
+    "password:dev": "node scripts/dev-password.mjs",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "wrangler d1 migrations apply kio-sbs --local -c wrangler.api.jsonc",
+    "db:migrate:remote": "wrangler d1 migrations apply kio-sbs --remote -c wrangler.api.jsonc",
+    "deploy:api": "wrangler deploy -c wrangler.api.jsonc",
+    "deploy:sync": "wrangler deploy -c wrangler.sync.jsonc",
+    "deploy": "npm run typecheck && npm run db:migrate:remote && npm run deploy:api && npm run deploy:sync",
+    "smoke": "API=http://127.0.0.1:8797 SYNC=http://127.0.0.1:8798 bash scripts/smoke.sh"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "graphql": "^16.11.0",
+    "graphql-http": "^1.22.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261123.1",
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.168.0"
+  }
+}

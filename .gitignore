@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+.dev.vars
+.wrangler
+*.log
+.DS_Store
+
+# Prototipo REST anterior (sólo referencia local, no se versiona)
+legacy/

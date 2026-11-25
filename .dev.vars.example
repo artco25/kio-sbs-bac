@@ -1,0 +1,2 @@
+# Copia a .dev.vars para desarrollo local (wrangler dev). Mínimo 24 caracteres.
+PROVISION_TOKEN=cambia-este-token-local-de-24+chars

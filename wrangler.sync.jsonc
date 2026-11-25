@@ -1,0 +1,24 @@
+// Worker 2: kio-sbs-sync — push/pull offline-first para las apps Flutter (cada 90 s).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "kio-sbs-sync",
+  "main": "src/sync/index.ts",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "vars": {
+    "APP_NAME": "kio-sbs-sync",
+    "CORS_ORIGIN": "*",
+    "SESSION_DAYS": "30"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "kio-sbs",
+      "database_id": "a7e973ce-7adf-4a4b-bd2b-31eda9fa25e1",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // Limpieza diaria de sesiones vencidas (03:00 Colombia).
+  "triggers": { "crons": ["0 8 * * *"] }
+}
