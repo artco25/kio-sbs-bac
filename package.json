@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "KIO SBS — 2 Workers Express + GraphQL sobre Cloudflare D1 (api + sync)",
+  "description": "KIO SBS \u2014 2 Workers Express + GraphQL sobre Cloudflare D1 (api + sync)",
   "scripts": {
     "dev:api": "wrangler dev -c wrangler.api.jsonc --port 8797 --inspector-port 9237",
     "dev:sync": "wrangler dev -c wrangler.sync.jsonc --port 8798 --inspector-port 9238",
