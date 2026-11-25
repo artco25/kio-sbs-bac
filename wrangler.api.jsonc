@@ -1,7 +1,7 @@
 // Worker 1: kio-sbs-api — GraphQL de consultas, autenticación, administración y panel KIO SBS.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "kio-sbs-api",
+  "name": "kio-sbs-backend",
   "main": "src/api/index.ts",
   "compatibility_date": "2026-04-01",
   "compatibility_flags": ["nodejs_compat"],
