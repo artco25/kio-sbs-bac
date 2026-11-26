@@ -296,6 +296,12 @@ export const typeDefs = /* GraphQL */ `
     transportAid: Boolean!
     eps: String
     afp: String
+    arlRisk: Int
+    integralSalary: Boolean
+    bankName: String
+    bankAccount: String
+    userId: String
+    user: User
     active: Boolean!
     payslips(limit: Int): [Payslip!]!
     leaveRequests: [LeaveRequest!]!

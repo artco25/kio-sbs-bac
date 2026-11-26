@@ -887,6 +887,7 @@ export const resolvers: Record<string, Record<string, R>> = {
     approvedBy: (e, _a, ctx) => byId(ctx, "users", e.approved_by),
   },
   Employee: {
+    user: (e, _a, ctx) => (e.user_id ? byId(ctx, "users", e.user_id) : null),
     payslips: (e, a, ctx) =>
       all(
         "SELECT * FROM payslips WHERE company_id = ? AND employee_id = ? AND deleted = 0 ORDER BY period DESC LIMIT ?",
