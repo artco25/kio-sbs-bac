@@ -530,7 +530,16 @@ const Mutation: Record<string, R> = {
   },
   deleteRecord: async (_s, a, ctx) => {
     const u = requireUser(ctx.user);
-    await writeRows(env.DB, u.company_id, prepareAll(u, [{ table: a.table, row: { id: a.id, deleted: 1 } }]));
+    const prepared = prepareAll(u, [{ table: a.table, row: { id: a.id, deleted: 1 } }]);
+    const p = prepared[0];
+    const now = nowIso();
+    // Soft delete directo: evita fallar por NOT NULL en INSERT de tablas con columnas requeridas.
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO sync_counter (company_id, value) VALUES (?, 1) ON CONFLICT(company_id) DO UPDATE SET value = value + 1").bind(u.company_id),
+      env.DB.prepare(
+        `UPDATE ${p.table} SET deleted = 1, updated_at = ?, updated_by = ?, rev = (SELECT value FROM sync_counter WHERE company_id = ?) WHERE id = ? AND company_id = ?`,
+      ).bind(now, u.id, u.company_id, a.id, u.company_id),
+    ]);
     return true;
   },
   login: async (_s, a, ctx) => {
@@ -636,11 +645,16 @@ const Mutation: Record<string, R> = {
       if (!r) throw gqlError("Rol personalizado no encontrado");
       role = r.base_role;
     }
+    let siteId: string | null = input.siteId ?? null;
+    if (siteId) {
+      const s = await one("SELECT id FROM sites WHERE id = ? AND company_id = ? AND deleted = 0", siteId, u.company_id);
+      if (!s) throw gqlError("Sede no encontrada");
+    }
     const id = uuid();
     await env.DB.prepare(
-      "INSERT INTO users (id, company_id, name, email, password_hash, role, role_id, pos_terminal, employee_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO users (id, company_id, name, email, password_hash, role, role_id, pos_terminal, employee_id, site_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
-      .bind(id, u.company_id, String(input.name).trim(), email, await hashPassword(input.password), role, input.roleId ?? null, input.posTerminal ?? null, input.employeeId ?? null)
+      .bind(id, u.company_id, String(input.name).trim(), email, await hashPassword(input.password), role, input.roleId ?? null, input.posTerminal ?? null, input.employeeId ?? null, siteId)
       .run();
     return one(`${USER_SELECT} WHERE u.id = ?`, id);
   },
@@ -669,6 +683,13 @@ const Mutation: Record<string, R> = {
     if (input.active != null) set("active", input.active ? 1 : 0);
     if (input.posTerminal !== undefined) set("pos_terminal", input.posTerminal);
     if (input.employeeId !== undefined) set("employee_id", input.employeeId);
+    if (input.siteId !== undefined) {
+      if (input.siteId) {
+        const s = await one("SELECT id FROM sites WHERE id = ? AND company_id = ? AND deleted = 0", input.siteId, u.company_id);
+        if (!s) throw gqlError("Sede no encontrada");
+        set("site_id", input.siteId);
+      } else set("site_id", null);
+    }
     if (input.password) {
       validatePassword(input.password);
       set("password_hash", await hashPassword(input.password));
@@ -682,6 +703,19 @@ const Mutation: Record<string, R> = {
     if (input.active === false || input.password) stmts.push(env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id));
     await env.DB.batch(stmts);
     return one(`${USER_SELECT} WHERE u.id = ?`, id);
+  },
+  assignDeviceSite: async (_s, { id, siteId }, ctx) => {
+    const u = requireUser(ctx.user, ["admin"]);
+    const dev = await one<Row>("SELECT * FROM devices WHERE id = ? AND company_id = ?", id, u.company_id);
+    if (!dev) throw gqlError("Dispositivo no encontrado", "NOT_FOUND");
+    let sid: string | null = siteId ?? null;
+    if (sid) {
+      const s = await one("SELECT id FROM sites WHERE id = ? AND company_id = ? AND deleted = 0", sid, u.company_id);
+      if (!s) throw gqlError("Sede no encontrada");
+    }
+    await env.DB.prepare("UPDATE devices SET site_id = ?, updated_at = ? WHERE id = ? AND company_id = ?")
+      .bind(sid, nowIso(), id, u.company_id).run();
+    return one("SELECT * FROM devices WHERE id = ? AND company_id = ?", id, u.company_id);
   },
   createPlatformUser: async (_s, { input }, ctx) => {
     const u = requirePlatform(ctx.user, 'admin');

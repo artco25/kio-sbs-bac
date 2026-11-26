@@ -457,8 +457,8 @@
         "address": "text",
         "city": "text",
         "phone": "text",
-        "active": "integer",
-        "is_default": "integer"
+        "active": "bool",
+        "is_default": "bool"
       },
       "indexes": [
         [
@@ -488,8 +488,8 @@
         "name": "text",
         "code": "text",
         "kind": "text",
-        "active": "integer",
-        "is_default": "integer"
+        "active": "bool",
+        "is_default": "bool"
       },
       "indexes": [
         [
