@@ -221,7 +221,8 @@ const Query: Record<string, R> = {
       WHERE s.company_id = ?1 AND s.deleted = 0
         AND (?2 IS NULL OR s.number LIKE ?2 OR pt.name LIKE ?2)
         AND (?3 IS NULL OR s.channel = ?3) AND (?4 IS NULL OR s.status = ?4) AND (?5 IS NULL OR s.partner_id = ?5)
-        AND (?6 IS NULL OR s.date >= ?6) AND (?7 IS NULL OR s.date < ?7) AND (?10 IS NULL OR s.pos_session_id = ?10)`;
+        AND (?6 IS NULL OR s.date >= ?6) AND (?7 IS NULL OR s.date < ?7) AND (?10 IS NULL OR s.pos_session_id = ?10)
+        AND (?11 IS NULL OR s.site_id = ?11)`;
     const binds = [
       u.company_id,
       like(a.search),
@@ -232,6 +233,7 @@ const Query: Record<string, R> = {
       isDate(a.to) ? dayAfter(a.to) : null,
     ];
     const session = a.posSessionId ?? null;
+    const siteId = a.siteId ?? null;
     const [items, agg] = await Promise.all([
       all(
         `SELECT s.*, (SELECT COALESCE(SUM(amount), 0) FROM payments x WHERE x.company_id = s.company_id AND x.sale_id = s.id AND x.deleted = 0) AS paid
@@ -240,6 +242,7 @@ const Query: Record<string, R> = {
         limit(a.limit),
         offset(a.offset),
         session,
+        siteId,
       ),
       one<{ n: number; amount: number }>(
         `SELECT COUNT(*) AS n, COALESCE(SUM(CASE WHEN s.status = 'confirmada' THEN s.total END), 0) AS amount ${sql}`,
@@ -247,6 +250,7 @@ const Query: Record<string, R> = {
         null,
         null,
         session,
+        siteId,
       ),
     ]);
     return { total: agg?.n ?? 0, amount: agg?.amount ?? 0, items };
@@ -1034,6 +1038,7 @@ export const resolvers: Record<string, Record<string, R>> = {
     balance: async (s, _a, ctx) => s.balance ?? s.total - (s.paid ?? sumPaid(await children(ctx, "payments", "sale_id", s.id))),
     partner: (s, _a, ctx) => byId(ctx, "partners", s.partner_id),
     seller: (s, _a, ctx) => byId(ctx, "users", s.seller_id),
+    site: (s, _a, ctx) => byId(ctx, "sites", s.site_id),
     lines: (s, _a, ctx) => children(ctx, "sale_lines", "sale_id", s.id, "sequence"),
     payments: (s, _a, ctx) => children(ctx, "payments", "sale_id", s.id, "date"),
   },

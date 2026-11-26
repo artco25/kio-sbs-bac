@@ -231,6 +231,7 @@ export const typeDefs = /* GraphQL */ `
     notes: String
     partner: Partner
     seller: User
+    site: Site
     lines: [SaleLine!]!
     payments: [Payment!]!
   }
@@ -496,7 +497,7 @@ export const typeDefs = /* GraphQL */ `
     stockMoves(productId: ID, kind: String, limit: Int): [StockMove!]!
     products(search: String, categoryId: ID, lowStock: Boolean, limit: Int, offset: Int): ProductPage!
     product(id: ID!): Product
-    sales(search: String, channel: String, status: String, partnerId: ID, posSessionId: ID, from: String, to: String, limit: Int, offset: Int): SalePage!
+    sales(search: String, channel: String, status: String, partnerId: ID, posSessionId: ID, siteId: ID, from: String, to: String, limit: Int, offset: Int): SalePage!
     sale(id: ID!): Sale
     "Ventas a crédito con saldo pendiente (cartera)"
     receivables(partnerId: ID, overdueOnly: Boolean): [Sale!]!
