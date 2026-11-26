@@ -26,6 +26,7 @@ export const typeDefs = /* GraphQL */ `
     lastLoginAt: String
     roleId: String
     roleName: String
+    platformRole: String
   }
 
   "Rol personalizado de la empresa: suites a las que entra y permiso por tabla ('r' leer, 'w' escribir)"
@@ -54,6 +55,7 @@ export const typeDefs = /* GraphQL */ `
     "Suites a las que puede ingresar"
     suites: [String!]!
     roleName: String
+    platformRole: String
   }
 
   type AuthPayload {
@@ -369,6 +371,22 @@ export const typeDefs = /* GraphQL */ `
     user: User
   }
 
+  type PlatformCompany {
+    id: ID!
+    name: String!
+    nit: String
+    email: String
+    phone: String
+    city: String
+    plan: String!
+    active: Boolean!
+    createdAt: String
+    usersCount: Int!
+    salesCount: Int!
+    salesTotal: Float!
+    lastActivityAt: String
+  }
+
   type Query {
     me: Me!
     company: Company!
@@ -378,6 +396,8 @@ export const typeDefs = /* GraphQL */ `
     "true si el auto-registro de empresas está habilitado"
     signupEnabled: Boolean!
     devices: [Device!]!
+    platformCompanies: [PlatformCompany!]!
+    platformUsers: [User!]!
 
     partners(search: String, customers: Boolean, suppliers: Boolean, withBalance: Boolean, limit: Int, offset: Int): PartnerPage!
     partner(id: ID!): Partner
@@ -426,6 +446,20 @@ export const typeDefs = /* GraphQL */ `
     posTerminal: String
     employeeId: String
   }
+  input PlatformUserInput {
+    name: String!
+    email: String!
+    password: String!
+    "owner | admin | viewer"
+    platformRole: String!
+    companyId: ID
+  }
+  input PlatformUserUpdate {
+    name: String
+    platformRole: String
+    active: Boolean
+    password: String
+  }
   input RoleInput {
     id: ID
     name: String!
@@ -473,6 +507,8 @@ export const typeDefs = /* GraphQL */ `
     createUser(input: UserInput!): User!
     updateUser(id: ID!, input: UserUpdate!): User!
     updateCompany(input: CompanyInput!): Company!
+    createPlatformUser(input: PlatformUserInput!): User!
+    updatePlatformUser(id: ID!, input: PlatformUserUpdate!): User!
     approveExpense(id: ID!, approve: Boolean!, notes: String): Expense!
     approveLeave(id: ID!, approve: Boolean!, notes: String): LeaveRequest!
   }

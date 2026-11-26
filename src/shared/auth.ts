@@ -4,6 +4,8 @@ import { env } from "./env";
 import { DEFAULT_SUITES, parseJson, type Perms, type SuiteKey } from "./suites";
 import type { Role } from "./sync";
 
+export type PlatformRole = 'owner' | 'admin' | 'viewer';
+
 export interface AuthUser {
   id: string;
   company_id: string;
@@ -20,6 +22,7 @@ export interface AuthUser {
   /** Matriz del rol personalizado (null = permisos del rol base). */
   perms: Perms | null;
   suites: SuiteKey[];
+  platform_role: PlatformRole | null;
 }
 
 const MAX_FAILED = 5;
@@ -44,7 +47,7 @@ export async function authenticate(token: string | null): Promise<AuthUser | nul
   const now = nowIso();
   const row = await env.DB.prepare(
     `SELECT s.id AS session_id, s.device_id, s.last_seen_at, u.id, u.company_id, u.name, u.email, u.role, u.employee_id, u.pos_terminal,
-            c.name AS company_name, u.role_id, r.name AS role_name, r.base_role, r.suites AS role_suites, r.permissions AS role_permissions
+            u.platform_role, c.name AS company_name, u.role_id, r.name AS role_name, r.base_role, r.suites AS role_suites, r.permissions AS role_permissions
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        JOIN companies c ON c.id = u.company_id

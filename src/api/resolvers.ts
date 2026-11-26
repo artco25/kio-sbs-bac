@@ -24,6 +24,7 @@ const meOf = async (user: AuthUser) => ({
   permissions: Object.fromEntries(TABLE_NAMES.map((t) => [t, { read: canRead(user, t), write: canWrite(user, t) }])),
   suites: user.suites,
   roleName: user.role_name,
+  platformRole: user.platform_role,
 });
 
 const roleOut = (r: Row) => ({
@@ -33,7 +34,7 @@ const roleOut = (r: Row) => ({
   permissions: parseJson<Record<string, string>>(r.permissions, {}),
   user_count: r.user_count ?? 0,
 });
-const USER_SELECT = `SELECT u.id, u.company_id, u.name, u.email, u.role, u.employee_id, u.pos_terminal, u.active, u.last_login_at, u.created_at,
+const USER_SELECT = `SELECT u.id, u.company_id, u.name, u.email, u.role, u.employee_id, u.pos_terminal, u.active, u.last_login_at, u.created_at, u.platform_role,
        u.role_id, r.name AS role_name FROM users u LEFT JOIN roles r ON r.id = u.role_id AND r.company_id = u.company_id`;
 
 /** CTE de cartera: saldo por venta a crédito confirmada. Parámetro ?1 = company_id. */
@@ -50,6 +51,14 @@ const RECV_CTE = `
 const boolArg = (v: unknown) => (v === true ? 1 : v === false ? 0 : null);
 const dayAfter = (d: string) => new Date(new Date(`${d}T00:00:00Z`).getTime() + 86_400_000).toISOString().slice(0, 10);
 const isDate = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+const PLATFORM_RANK: Record<string, number> = { viewer: 1, admin: 2, owner: 3 };
+function requirePlatform(user: AuthUser | null, min: 'viewer' | 'admin' | 'owner' = 'viewer'): AuthUser {
+  const u = requireUser(user);
+  const rank = u.platform_role ? (PLATFORM_RANK[u.platform_role] ?? 0) : 0;
+  if (rank < PLATFORM_RANK[min]) throw gqlError('No tienes acceso a la plataforma', 'FORBIDDEN');
+  return u;
+}
 
 // ------------------------------------------------------------------ Query
 
@@ -74,6 +83,28 @@ const Query: Record<string, R> = {
   devices: async (_s, _a, ctx) => {
     const u = requireUser(ctx.user, ["admin"]);
     return all("SELECT * FROM devices WHERE company_id = ? ORDER BY last_sync_at DESC", u.company_id);
+  },
+  platformCompanies: async (_s, _a, ctx) => {
+    requirePlatform(ctx.user, 'viewer');
+    return all(`
+      SELECT c.id, c.name, c.nit, c.email, c.phone, c.city, c.plan, c.active, c.created_at,
+             (SELECT COUNT(*) FROM users u WHERE u.company_id = c.id) AS users_count,
+             (SELECT COUNT(*) FROM sales s WHERE s.company_id = c.id AND s.deleted = 0) AS sales_count,
+             (SELECT COALESCE(SUM(s.total), 0) FROM sales s WHERE s.company_id = c.id AND s.deleted = 0 AND s.status = 'confirmada') AS sales_total,
+             (SELECT MAX(x.ts) FROM (
+                SELECT updated_at AS ts FROM sales WHERE company_id = c.id
+                UNION ALL SELECT updated_at AS ts FROM payments WHERE company_id = c.id
+                UNION ALL SELECT last_sync_at AS ts FROM devices WHERE company_id = c.id
+                UNION ALL SELECT created_at AS ts FROM users WHERE company_id = c.id
+             ) x) AS last_activity_at
+        FROM companies c
+       ORDER BY c.created_at DESC
+    `);
+  },
+  platformUsers: async (_s, _a, ctx) => {
+    requirePlatform(ctx.user, 'viewer');
+    return all(`SELECT ${USER_COLS} FROM users WHERE platform_role IS NOT NULL ORDER BY 
+      CASE platform_role WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 ELSE 3 END, name`);
   },
 
   partners: async (_s, a, ctx) => {
@@ -636,6 +667,57 @@ const Mutation: Record<string, R> = {
     const stmts = [env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...binds, id)];
     // Desactivar, cambiar rol o restablecer clave cierra sus sesiones abiertas.
     if (input.active === false || input.password) stmts.push(env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(id));
+    await env.DB.batch(stmts);
+    return one(`${USER_SELECT} WHERE u.id = ?`, id);
+  },
+  createPlatformUser: async (_s, { input }, ctx) => {
+    const u = requirePlatform(ctx.user, 'admin');
+    const pr = String(input.platformRole);
+    if (!PLATFORM_RANK[pr]) throw gqlError('platformRole inválido (owner|admin|viewer)');
+    if (PLATFORM_RANK[pr] > PLATFORM_RANK[u.platform_role!]) throw gqlError('No puedes crear un usuario con más privilegios que tú', 'FORBIDDEN');
+    const email = String(input.email).trim().toLowerCase();
+    if (!EMAIL_RE.test(email)) throw gqlError('Correo inválido');
+    if (!String(input.name ?? '').trim()) throw gqlError('El nombre es obligatorio');
+    validatePassword(input.password);
+    if (await one('SELECT id FROM users WHERE email = ?', email)) throw gqlError('Ya existe un usuario con ese correo', 'CONFLICT');
+    const companyId = input.companyId ? String(input.companyId) : u.company_id;
+    const company = await one('SELECT id FROM companies WHERE id = ?', companyId);
+    if (!company) throw gqlError('Empresa no encontrada');
+    const id = uuid();
+    await env.DB.prepare(
+      'INSERT INTO users (id, company_id, name, email, password_hash, role, active, platform_role) VALUES (?, ?, ?, ?, ?, ?, 1, ?)',
+    ).bind(id, companyId, String(input.name).trim(), email, await hashPassword(input.password), 'admin', pr).run();
+    return one(`${USER_SELECT} WHERE u.id = ?`, id);
+  },
+  updatePlatformUser: async (_s, { id, input }, ctx) => {
+    const u = requirePlatform(ctx.user, 'admin');
+    const target = await one<Row>(`SELECT ${USER_COLS} FROM users WHERE id = ?`, id);
+    if (!target) throw gqlError('Usuario no encontrado', 'NOT_FOUND');
+    if (!target.platform_role) throw gqlError('El usuario no es de plataforma');
+    if (PLATFORM_RANK[target.platform_role] > PLATFORM_RANK[u.platform_role!]) throw gqlError('No puedes modificar un usuario con más privilegios que tú', 'FORBIDDEN');
+    if (input.platformRole) {
+      if (!PLATFORM_RANK[input.platformRole]) throw gqlError('platformRole inválido');
+      if (PLATFORM_RANK[input.platformRole] > PLATFORM_RANK[u.platform_role!]) throw gqlError('No puedes asignar más privilegios que los tuyos', 'FORBIDDEN');
+    }
+    if (id === u.id && (input.active === false || (input.platformRole && input.platformRole !== 'owner'))) {
+      throw gqlError('No puedes degradarte ni desactivarte a ti mismo');
+    }
+    const sets: string[] = [];
+    const binds: unknown[] = [];
+    const set = (col: string, v: unknown) => (sets.push(`${col} = ?`), binds.push(v));
+    if (input.name != null) set('name', String(input.name).trim());
+    if (input.platformRole) set('platform_role', input.platformRole);
+    if (input.active != null) set('active', input.active ? 1 : 0);
+    if (input.password) {
+      validatePassword(input.password);
+      set('password_hash', await hashPassword(input.password));
+      set('failed_logins', 0);
+      set('locked_until', null);
+    }
+    if (!sets.length) return one(`${USER_SELECT} WHERE u.id = ?`, id);
+    set('updated_at', nowIso());
+    const stmts = [env.DB.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).bind(...binds, id)];
+    if (input.active === false || input.password) stmts.push(env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(id));
     await env.DB.batch(stmts);
     return one(`${USER_SELECT} WHERE u.id = ?`, id);
   },
