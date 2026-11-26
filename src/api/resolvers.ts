@@ -46,7 +46,7 @@ const USER_SELECT = `SELECT u.id, u.company_id, u.name, u.email, u.role, u.emplo
 const RECV_CTE = `
   WITH paid AS (
     SELECT sale_id, SUM(amount) AS paid FROM payments
-     WHERE company_id = ?1 AND deleted = 0 AND sale_id IS NOT NULL AND kind IN ('venta', 'abono') GROUP BY sale_id
+     WHERE company_id = ?1 AND deleted = 0 AND sale_id IS NOT NULL AND kind IN ('venta', 'abono', 'reembolso') GROUP BY sale_id
   ), recv AS (
     SELECT s.id, s.partner_id, NULLIF(s.due_date, '') AS due_date, s.total - COALESCE(paid.paid, 0) AS balance
       FROM sales s LEFT JOIN paid ON paid.sale_id = s.id
