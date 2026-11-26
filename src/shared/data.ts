@@ -19,7 +19,7 @@ export const like = (s: unknown) => (typeof s === "string" && s.trim() ? `%${s.t
 export const today = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
 
 /** Columnas públicas de usuarios (nunca exponer password_hash ni contadores de bloqueo). */
-export const USER_COLS = "id, company_id, name, email, role, employee_id, pos_terminal, active, last_login_at, created_at, platform_role";
+export const USER_COLS = "id, company_id, name, email, role, employee_id, pos_terminal, active, last_login_at, created_at, platform_role, site_id";
 
 // ------------------------------------------------------------------ loaders por request (evitan N+1)
 

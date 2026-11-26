@@ -1,134 +1,510 @@
 {
   "$comment": "Fuente única de verdad de las tablas sincronizables. Genera migrations/0006 (D1) y lib/data/tables.g.dart (Flutter) con `node scripts/gen-schema.mjs`. Columnas comunes implícitas: id, company_id, created_at, updated_at, updated_by, deleted, rev.",
-  "roles": ["admin", "contador", "cajero", "vendedor"],
+  "roles": [
+    "admin",
+    "contador",
+    "cajero",
+    "vendedor"
+  ],
   "tables": {
     "partners": {
-      "label": "Contactos", "axis": "comercial",
-      "read": "*", "write": ["admin", "contador", "cajero", "vendedor"],
+      "label": "Contactos",
+      "axis": "comercial",
+      "read": "*",
+      "write": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
       "columns": {
-        "name": "text", "doc_type": "text", "doc_number": "text", "email": "text", "phone": "text",
-        "address": "text", "city": "text", "is_customer": "bool", "is_supplier": "bool",
-        "credit_limit": "real", "payment_term_days": "int", "blocked": "bool", "seller_id": "text", "notes": "text"
+        "name": "text",
+        "doc_type": "text",
+        "doc_number": "text",
+        "email": "text",
+        "phone": "text",
+        "address": "text",
+        "city": "text",
+        "is_customer": "bool",
+        "is_supplier": "bool",
+        "credit_limit": "real",
+        "payment_term_days": "int",
+        "blocked": "bool",
+        "seller_id": "text",
+        "notes": "text"
       },
-      "indexes": [["doc_number"], ["name"]]
+      "indexes": [
+        [
+          "doc_number"
+        ],
+        [
+          "name"
+        ]
+      ]
     },
     "categories": {
-      "label": "Categorías", "axis": "comercial",
-      "read": "*", "write": ["admin", "contador"],
-      "columns": { "name": "text", "color": "text", "sequence": "int" }
+      "label": "Categorías",
+      "axis": "comercial",
+      "read": "*",
+      "write": [
+        "admin",
+        "contador"
+      ],
+      "columns": {
+        "name": "text",
+        "color": "text",
+        "sequence": "int"
+      }
     },
     "products": {
-      "label": "Productos", "axis": "comercial",
-      "read": "*", "write": ["admin", "contador"],
+      "label": "Productos",
+      "axis": "comercial",
+      "read": "*",
+      "write": [
+        "admin",
+        "contador"
+      ],
       "columns": {
-        "name": "text", "sku": "text", "barcode": "text", "category_id": "text", "unit": "text",
-        "price": "real", "cost": "real", "tax_rate": "real", "track_stock": "bool", "min_stock": "real",
-        "available_pos": "bool", "active": "bool"
+        "name": "text",
+        "sku": "text",
+        "barcode": "text",
+        "category_id": "text",
+        "unit": "text",
+        "price": "real",
+        "cost": "real",
+        "tax_rate": "real",
+        "track_stock": "bool",
+        "min_stock": "real",
+        "available_pos": "bool",
+        "active": "bool"
       },
-      "indexes": [["barcode"], ["sku"], ["category_id"]]
+      "indexes": [
+        [
+          "barcode"
+        ],
+        [
+          "sku"
+        ],
+        [
+          "category_id"
+        ]
+      ]
     },
     "stock_moves": {
-      "label": "Movimientos de inventario", "axis": "comercial",
-      "read": "*", "write": ["admin", "contador", "cajero", "vendedor"],
+      "label": "Movimientos de inventario",
+      "axis": "comercial",
+      "read": "*",
+      "write": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
       "columns": {
-        "product_id": "text", "qty": "real", "kind": "text", "ref_id": "text", "date": "text", "unit_cost": "real", "notes": "text"
+        "product_id": "text",
+        "qty": "real",
+        "kind": "text",
+        "ref_id": "text",
+        "date": "text",
+        "unit_cost": "real",
+        "notes": "text",
+        "site_id": "text",
+        "warehouse_id": "text",
+        "warehouse_to_id": "text"
       },
-      "indexes": [["product_id"]]
+      "indexes": [
+        [
+          "product_id"
+        ]
+      ]
     },
     "pos_sessions": {
-      "label": "Sesiones de caja", "axis": "pos",
-      "read": "*", "write": ["admin", "cajero"],
+      "label": "Sesiones de caja",
+      "axis": "pos",
+      "read": "*",
+      "write": [
+        "admin",
+        "cajero"
+      ],
       "columns": {
-        "number": "text", "terminal": "text", "user_id": "text", "opened_at": "text", "closed_at": "text",
-        "opening_cash": "real", "expected_cash": "real", "counted_cash": "real", "difference": "real",
-        "status": "text", "notes": "text"
+        "number": "text",
+        "terminal": "text",
+        "user_id": "text",
+        "opened_at": "text",
+        "closed_at": "text",
+        "opening_cash": "real",
+        "expected_cash": "real",
+        "counted_cash": "real",
+        "difference": "real",
+        "status": "text",
+        "notes": "text",
+        "site_id": "text"
       }
     },
     "sales": {
-      "label": "Ventas y pedidos", "axis": "comercial",
-      "read": "*", "write": ["admin", "contador", "cajero", "vendedor"],
+      "label": "Ventas y pedidos",
+      "axis": "comercial",
+      "read": "*",
+      "write": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
       "columns": {
-        "number": "text", "channel": "text", "partner_id": "text", "seller_id": "text", "pos_session_id": "text",
-        "date": "text", "due_date": "text", "status": "text", "payment_mode": "text",
-        "subtotal": "real", "discount_total": "real", "tax_total": "real", "total": "real",
-        "kitchen_status": "text", "table_ref": "text", "notes": "text"
+        "number": "text",
+        "channel": "text",
+        "partner_id": "text",
+        "seller_id": "text",
+        "pos_session_id": "text",
+        "date": "text",
+        "due_date": "text",
+        "status": "text",
+        "payment_mode": "text",
+        "subtotal": "real",
+        "discount_total": "real",
+        "tax_total": "real",
+        "total": "real",
+        "kitchen_status": "text",
+        "table_ref": "text",
+        "notes": "text",
+        "site_id": "text"
       },
-      "indexes": [["partner_id"], ["pos_session_id"], ["date"]]
+      "indexes": [
+        [
+          "partner_id"
+        ],
+        [
+          "pos_session_id"
+        ],
+        [
+          "date"
+        ]
+      ]
     },
     "sale_lines": {
-      "label": "Líneas de venta", "axis": "comercial",
-      "read": "*", "write": ["admin", "contador", "cajero", "vendedor"],
+      "label": "Líneas de venta",
+      "axis": "comercial",
+      "read": "*",
+      "write": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
       "columns": {
-        "sale_id": "text", "product_id": "text", "name": "text", "qty": "real", "price": "real",
-        "discount_pct": "real", "tax_rate": "real", "subtotal": "real", "tax": "real", "total": "real", "sequence": "int"
+        "sale_id": "text",
+        "product_id": "text",
+        "name": "text",
+        "qty": "real",
+        "price": "real",
+        "discount_pct": "real",
+        "tax_rate": "real",
+        "subtotal": "real",
+        "tax": "real",
+        "total": "real",
+        "sequence": "int",
+        "site_id": "text"
       },
-      "indexes": [["sale_id"]]
+      "indexes": [
+        [
+          "sale_id"
+        ]
+      ]
     },
     "payments": {
-      "label": "Pagos y recibos de caja", "axis": "financiero",
-      "read": "*", "write": ["admin", "contador", "cajero", "vendedor"],
+      "label": "Pagos y recibos de caja",
+      "axis": "financiero",
+      "read": "*",
+      "write": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
       "columns": {
-        "number": "text", "kind": "text", "sale_id": "text", "partner_id": "text", "pos_session_id": "text",
-        "date": "text", "method": "text", "amount": "real", "reference": "text", "user_id": "text", "notes": "text"
+        "number": "text",
+        "kind": "text",
+        "sale_id": "text",
+        "partner_id": "text",
+        "pos_session_id": "text",
+        "date": "text",
+        "method": "text",
+        "amount": "real",
+        "reference": "text",
+        "user_id": "text",
+        "notes": "text",
+        "site_id": "text"
       },
-      "indexes": [["sale_id"], ["partner_id"], ["pos_session_id"]]
+      "indexes": [
+        [
+          "sale_id"
+        ],
+        [
+          "partner_id"
+        ],
+        [
+          "pos_session_id"
+        ]
+      ]
     },
     "expenses": {
-      "label": "Caja menor y gastos", "axis": "financiero",
-      "read": "*", "write": ["admin", "contador", "cajero", "vendedor"],
+      "label": "Caja menor y gastos",
+      "axis": "financiero",
+      "read": "*",
+      "write": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
       "columns": {
-        "number": "text", "date": "text", "concept": "text", "category": "text", "amount": "real", "tax": "real",
-        "partner_id": "text", "pos_session_id": "text", "status": "text", "requested_by": "text",
-        "approved_by": "text", "approved_at": "text", "receipt_ref": "text", "notes": "text"
+        "number": "text",
+        "date": "text",
+        "concept": "text",
+        "category": "text",
+        "amount": "real",
+        "tax": "real",
+        "partner_id": "text",
+        "pos_session_id": "text",
+        "status": "text",
+        "requested_by": "text",
+        "approved_by": "text",
+        "approved_at": "text",
+        "receipt_ref": "text",
+        "notes": "text",
+        "site_id": "text"
       },
-      "indexes": [["status"]]
+      "indexes": [
+        [
+          "status"
+        ]
+      ]
     },
     "employees": {
-      "label": "Empleados", "axis": "personal",
-      "read": ["admin", "contador"], "write": ["admin", "contador"],
+      "label": "Empleados",
+      "axis": "personal",
+      "read": [
+        "admin",
+        "contador"
+      ],
+      "write": [
+        "admin",
+        "contador"
+      ],
       "columns": {
-        "name": "text", "doc_type": "text", "doc_number": "text", "email": "text", "phone": "text", "position": "text",
-        "department": "text", "salary": "real", "start_date": "text", "end_date": "text", "contract_type": "text",
-        "pay_frequency": "text", "transport_aid": "bool", "integral_salary": "bool", "eps": "text", "afp": "text",
-        "arl_risk": "int", "bank_name": "text", "bank_account": "text", "user_id": "text", "active": "bool"
+        "name": "text",
+        "doc_type": "text",
+        "doc_number": "text",
+        "email": "text",
+        "phone": "text",
+        "position": "text",
+        "department": "text",
+        "salary": "real",
+        "start_date": "text",
+        "end_date": "text",
+        "contract_type": "text",
+        "pay_frequency": "text",
+        "transport_aid": "bool",
+        "integral_salary": "bool",
+        "eps": "text",
+        "afp": "text",
+        "arl_risk": "int",
+        "bank_name": "text",
+        "bank_account": "text",
+        "user_id": "text",
+        "active": "bool"
       }
     },
     "payroll_novelties": {
-      "label": "Novedades de nómina", "axis": "personal",
-      "read": ["admin", "contador"], "write": ["admin", "contador"],
+      "label": "Novedades de nómina",
+      "axis": "personal",
+      "read": [
+        "admin",
+        "contador"
+      ],
+      "write": [
+        "admin",
+        "contador"
+      ],
       "columns": {
-        "employee_id": "text", "period": "text", "date": "text", "type": "text", "quantity": "real",
-        "amount": "real", "payslip_id": "text", "notes": "text"
+        "employee_id": "text",
+        "period": "text",
+        "date": "text",
+        "type": "text",
+        "quantity": "real",
+        "amount": "real",
+        "payslip_id": "text",
+        "notes": "text"
       },
-      "indexes": [["employee_id"], ["period"]]
+      "indexes": [
+        [
+          "employee_id"
+        ],
+        [
+          "period"
+        ]
+      ]
     },
     "leave_requests": {
-      "label": "Vacaciones y permisos", "axis": "personal",
-      "read": ["admin", "contador"], "write": ["admin", "contador"],
+      "label": "Vacaciones y permisos",
+      "axis": "personal",
+      "read": [
+        "admin",
+        "contador"
+      ],
+      "write": [
+        "admin",
+        "contador"
+      ],
       "columns": {
-        "employee_id": "text", "type": "text", "date_from": "text", "date_to": "text", "days": "real",
-        "paid": "bool", "status": "text", "approved_by": "text", "notes": "text"
+        "employee_id": "text",
+        "type": "text",
+        "date_from": "text",
+        "date_to": "text",
+        "days": "real",
+        "paid": "bool",
+        "status": "text",
+        "approved_by": "text",
+        "notes": "text"
       },
-      "indexes": [["employee_id"]]
+      "indexes": [
+        [
+          "employee_id"
+        ]
+      ]
     },
     "payslips": {
-      "label": "Desprendibles de nómina", "axis": "personal",
-      "read": ["admin", "contador"], "write": ["admin", "contador"],
+      "label": "Desprendibles de nómina",
+      "axis": "personal",
+      "read": [
+        "admin",
+        "contador"
+      ],
+      "write": [
+        "admin",
+        "contador"
+      ],
       "columns": {
-        "number": "text", "employee_id": "text", "period": "text", "date_from": "text", "date_to": "text", "days": "real",
-        "basic": "real", "transport": "real", "overtime": "real", "other_earnings": "real", "total_earnings": "real",
-        "health": "real", "pension": "real", "solidarity": "real", "other_deductions": "real", "total_deductions": "real",
-        "net": "real", "employer_cost": "real", "status": "text", "detail": "text"
+        "number": "text",
+        "employee_id": "text",
+        "period": "text",
+        "date_from": "text",
+        "date_to": "text",
+        "days": "real",
+        "basic": "real",
+        "transport": "real",
+        "overtime": "real",
+        "other_earnings": "real",
+        "total_earnings": "real",
+        "health": "real",
+        "pension": "real",
+        "solidarity": "real",
+        "other_deductions": "real",
+        "total_deductions": "real",
+        "net": "real",
+        "employer_cost": "real",
+        "status": "text",
+        "detail": "text"
       },
-      "indexes": [["employee_id"], ["period"]]
+      "indexes": [
+        [
+          "employee_id"
+        ],
+        [
+          "period"
+        ]
+      ]
     },
     "payroll_params": {
-      "label": "Parámetros de nómina", "axis": "personal",
-      "read": "*", "write": ["admin", "contador"],
+      "label": "Parámetros de nómina",
+      "axis": "personal",
+      "read": "*",
+      "write": [
+        "admin",
+        "contador"
+      ],
       "columns": {
-        "year": "int", "smmlv": "real", "transport_aid": "real", "uvt": "real", "health_pct": "real",
-        "pension_pct": "real", "hours_divisor": "real", "sunday_surcharge": "real", "notes": "text"
+        "year": "int",
+        "smmlv": "real",
+        "transport_aid": "real",
+        "uvt": "real",
+        "health_pct": "real",
+        "pension_pct": "real",
+        "hours_divisor": "real",
+        "sunday_surcharge": "real",
+        "notes": "text"
       }
+    },
+    "sites": {
+      "label": "Sedes",
+      "axis": "sistema",
+      "read": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
+      "write": [
+        "admin"
+      ],
+      "columns": {
+        "name": "text",
+        "code": "text",
+        "kind": "text",
+        "business_type": "text",
+        "catalog_mode": "text",
+        "address": "text",
+        "city": "text",
+        "phone": "text",
+        "active": "integer",
+        "is_default": "integer"
+      },
+      "indexes": [
+        [
+          "company_id",
+          "rev"
+        ],
+        [
+          "company_id",
+          "active"
+        ]
+      ]
+    },
+    "warehouses": {
+      "label": "Bodegas",
+      "axis": "sistema",
+      "read": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
+      "write": [
+        "admin"
+      ],
+      "columns": {
+        "site_id": "text",
+        "name": "text",
+        "code": "text",
+        "kind": "text",
+        "active": "integer",
+        "is_default": "integer"
+      },
+      "indexes": [
+        [
+          "company_id",
+          "rev"
+        ],
+        [
+          "company_id",
+          "site_id"
+        ],
+        [
+          "company_id",
+          "active"
+        ]
+      ]
     }
   }
 }

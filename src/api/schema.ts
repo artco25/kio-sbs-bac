@@ -12,6 +12,9 @@ export const typeDefs = /* GraphQL */ `
     currency: String!
     receiptFooter: String
     plan: String!
+    businessTypesEnabled: JSON
+    catalogModeDefault: String
+    settings: JSON
   }
 
   type User {
@@ -27,6 +30,7 @@ export const typeDefs = /* GraphQL */ `
     roleId: String
     roleName: String
     platformRole: String
+    siteId: String
   }
 
   "Rol personalizado de la empresa: suites a las que entra y permiso por tabla ('r' leer, 'w' escribir)"
@@ -45,6 +49,31 @@ export const typeDefs = /* GraphQL */ `
     key: String!
     label: String!
     tables: [String!]!
+  }
+
+  type Site {
+    id: ID!
+    name: String!
+    code: String
+    kind: String
+    businessType: String
+    catalogMode: String
+    address: String
+    city: String
+    phone: String
+    active: Boolean!
+    isDefault: Boolean!
+  }
+
+  type Warehouse {
+    id: ID!
+    name: String!
+    code: String
+    kind: String
+    siteId: String
+    active: Boolean!
+    isDefault: Boolean!
+    site: Site
   }
 
   type Me {
@@ -111,6 +140,9 @@ export const typeDefs = /* GraphQL */ `
     unitCost: Float!
     notes: String
     createdAt: String
+    siteId: String
+    warehouseId: String
+    warehouseToId: String
     product: Product
   }
 
@@ -144,6 +176,7 @@ export const typeDefs = /* GraphQL */ `
     status: String
     paymentMode: String
     posSessionId: String
+    siteId: String
     kitchenStatus: String
     tableRef: String
     subtotal: Float!
@@ -195,6 +228,7 @@ export const typeDefs = /* GraphQL */ `
     difference: Float!
     salesTotal: Float!
     salesCount: Int!
+    siteId: String
     user: User
     byMethod: [MethodTotal!]!
   }
@@ -210,6 +244,7 @@ export const typeDefs = /* GraphQL */ `
     reference: String
     saleId: String
     posSessionId: String
+    siteId: String
     notes: String
     partner: Partner
     sale: Sale
@@ -225,6 +260,7 @@ export const typeDefs = /* GraphQL */ `
     status: String
     approvedAt: String
     notes: String
+    siteId: String
     partner: Partner
     requestedBy: User
     approvedBy: User
@@ -368,6 +404,7 @@ export const typeDefs = /* GraphQL */ `
     lastSyncAt: String
     lastCursor: Int!
     pending: Int!
+    siteId: String
     user: User
   }
 
@@ -396,6 +433,8 @@ export const typeDefs = /* GraphQL */ `
     "true si el auto-registro de empresas está habilitado"
     signupEnabled: Boolean!
     devices: [Device!]!
+    sites: [Site!]!
+    warehouses(siteId: String): [Warehouse!]!
     platformCompanies: [PlatformCompany!]!
     platformUsers: [User!]!
 

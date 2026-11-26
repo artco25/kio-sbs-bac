@@ -34,7 +34,7 @@ const roleOut = (r: Row) => ({
   permissions: parseJson<Record<string, string>>(r.permissions, {}),
   user_count: r.user_count ?? 0,
 });
-const USER_SELECT = `SELECT u.id, u.company_id, u.name, u.email, u.role, u.employee_id, u.pos_terminal, u.active, u.last_login_at, u.created_at, u.platform_role,
+const USER_SELECT = `SELECT u.id, u.company_id, u.name, u.email, u.role, u.employee_id, u.pos_terminal, u.active, u.last_login_at, u.created_at, u.platform_role, u.site_id,
        u.role_id, r.name AS role_name FROM users u LEFT JOIN roles r ON r.id = u.role_id AND r.company_id = u.company_id`;
 
 /** CTE de cartera: saldo por venta a crédito confirmada. Parámetro ?1 = company_id. */
@@ -83,6 +83,19 @@ const Query: Record<string, R> = {
   devices: async (_s, _a, ctx) => {
     const u = requireUser(ctx.user, ["admin"]);
     return all("SELECT * FROM devices WHERE company_id = ? ORDER BY last_sync_at DESC", u.company_id);
+  },
+  sites: async (_s, _a, ctx) => {
+    const u = guardRead(ctx, "sites");
+    return all("SELECT * FROM sites WHERE company_id = ? AND deleted = 0 ORDER BY is_default DESC, name", u.company_id);
+  },
+  warehouses: async (_s, a, ctx) => {
+    const u = guardRead(ctx, "warehouses");
+    return all(
+      "SELECT * FROM warehouses WHERE company_id = ? AND deleted = 0 AND (? IS NULL OR site_id = ?) ORDER BY is_default DESC, name",
+      u.company_id,
+      a.siteId ?? null,
+      a.siteId ?? null,
+    );
   },
   platformCompanies: async (_s, _a, ctx) => {
     requirePlatform(ctx.user, 'viewer');
@@ -847,6 +860,7 @@ export const resolvers: Record<string, Record<string, R>> = {
   LeaveRequest: { employee: (l, _a, ctx) => byId(ctx, "employees", l.employee_id) },
   Novelty: { employee: (n, _a, ctx) => byId(ctx, "employees", n.employee_id) },
   Device: { user: (d, _a, ctx) => byId(ctx, "users", d.user_id) },
+  Warehouse: { site: (w, _a, ctx) => byId(ctx, "sites", w.site_id) },
 };
 
 function partnerBalance(ctx: Ctx, partnerId: string) {
