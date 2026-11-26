@@ -540,7 +540,16 @@ const Mutation: Record<string, R> = {
     if (ctx._saved) throw gqlError("Sólo se permite un saveRecords por solicitud");
     ctx._saved = true;
     const prepared = prepareAll(u, a.changes);
-    await writeRows(env.DB, u.company_id, prepared);
+    try {
+      await writeRows(env.DB, u.company_id, prepared);
+    } catch (e: any) {
+      const msg = String(e?.message || e);
+      if (msg.includes("UNIQUE constraint failed: warehouse_stocks")) {
+        throw gqlError("Este producto ya está asociado a esa bodega. Edita la existencia existente.");
+      }
+      if (msg.includes("UNIQUE constraint failed")) throw gqlError("Ya existe un registro con esos datos.");
+      throw gqlError("Error interno al guardar. " + msg.slice(0, 120), "INTERNAL");
+    }
     return prepared.map((p) => p.values.id);
   },
   deleteRecord: async (_s, a, ctx) => {

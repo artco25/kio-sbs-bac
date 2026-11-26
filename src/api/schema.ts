@@ -453,7 +453,7 @@ export const typeDefs = /* GraphQL */ `
     devices: [Device!]!
     sites: [Site!]!
     warehouses(siteId: String): [Warehouse!]!
-    warehouseStocks(warehouseId: String, productId: String, siteId: String): [WarehouseStock!]!
+    warehouseStocks(warehouseId: ID, productId: ID, siteId: ID): [WarehouseStock!]!
     platformCompanies: [PlatformCompany!]!
     platformUsers: [User!]!
 
