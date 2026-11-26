@@ -23,9 +23,10 @@ CREATE INDEX IF NOT EXISTS ix_warehouse_stocks_rev ON warehouse_stocks(company_i
 CREATE UNIQUE INDEX IF NOT EXISTS ux_warehouse_stocks_wh_product ON warehouse_stocks(company_id, warehouse_id, product_id) WHERE deleted = 0;
 
 -- Backfill: crear existencias en bodega principal para productos con track_stock.
+-- qty en stock_moves es con signo (compra/entrada +, venta/salida -), por eso se usa SUM(qty).
 INSERT INTO warehouse_stocks (id, company_id, site_id, warehouse_id, product_id, qty, min_qty, active, updated_by)
 SELECT lower(hex(randomblob(16))), p.company_id, w.site_id, w.id, p.id,
-  COALESCE((SELECT SUM(CASE WHEN sm.kind='in' THEN sm.qty WHEN sm.kind='out' THEN -sm.qty WHEN sm.kind='adjust' THEN sm.qty ELSE 0 END)
+  COALESCE((SELECT SUM(sm.qty)
             FROM stock_moves sm WHERE sm.company_id=p.company_id AND sm.product_id=p.id AND sm.deleted=0), 0),
   COALESCE(p.min_stock, 0), 1, 'migration-0010'
 FROM products p
