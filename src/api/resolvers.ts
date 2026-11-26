@@ -17,6 +17,11 @@ const guardRead = (ctx: Ctx, table: string) => {
   if (!canRead(u, table)) throw gqlError("No tienes permiso para consultar esta información", "FORBIDDEN");
   return u;
 };
+const guardWrite = (ctx: Ctx, table: string) => {
+  const u = requireUser(ctx.user);
+  if (!canWrite(u, table)) throw gqlError("No tienes permiso para modificar esta información", "FORBIDDEN");
+  return u;
+};
 
 const meOf = async (user: AuthUser) => ({
   user: await one(`SELECT ${USER_COLS} FROM users WHERE id = ?`, user.id),
@@ -112,6 +117,19 @@ const Query: Record<string, R> = {
       a.siteId ?? null, a.siteId ?? null,
     );
   },
+  requisitions: async (_s, a, ctx) => {
+    const u = guardRead(ctx, "requisitions");
+    return all(
+      `SELECT * FROM requisitions WHERE company_id = ? AND deleted = 0
+         AND (? IS NULL OR status = ?)
+         AND (? IS NULL OR site_id = ?)
+       ORDER BY created_at DESC, id DESC LIMIT 200`,
+      u.company_id,
+      a.status ?? null, a.status ?? null,
+      a.siteId ?? null, a.siteId ?? null,
+    );
+  },
+  requisition: async (_s, a, ctx) => (guardRead(ctx, "requisitions"), byId(ctx, "requisitions", a.id)),
   platformCompanies: async (_s, _a, ctx) => {
     requirePlatform(ctx.user, 'viewer');
     return all(`
@@ -605,6 +623,83 @@ const Mutation: Record<string, R> = {
     ]);
     return true;
   },
+  processRequisition: async (_s, a, ctx) => {
+    const u = requireUser(ctx.user);
+    guardWrite(ctx, "requisitions");
+    const req = await one<Row>("SELECT * FROM requisitions WHERE id = ? AND company_id = ? AND deleted = 0", a.id, u.company_id);
+    if (!req) throw gqlError("Requisición no encontrada", "NOT_FOUND");
+    const action = String(a.action || "").toLowerCase();
+    const now = nowIso();
+    const lines = await all<Row>("SELECT * FROM requisition_lines WHERE requisition_id = ? AND company_id = ? AND deleted = 0", a.id, u.company_id);
+    if (!lines.length && action !== "cancel") throw gqlError("La requisición no tiene líneas.");
+
+    const setStatus = async (status: string, extra: Record<string, unknown> = {}) => {
+      const fields = ["status = ?", "updated_at = ?", "updated_by = ?"];
+      const binds: unknown[] = [status, now, u.id];
+      for (const [k, v] of Object.entries(extra)) { fields.push(`${k} = ?`); binds.push(v); }
+      binds.push(a.id, u.company_id);
+      await env.DB.prepare(`UPDATE requisitions SET ${fields.join(", ")} WHERE id = ? AND company_id = ?`).bind(...binds).run();
+    };
+
+    const ensureWs = async (warehouseId: string, productId: string) => {
+      let ws = await one<Row>("SELECT id, qty FROM warehouse_stocks WHERE company_id = ? AND warehouse_id = ? AND product_id = ? AND deleted = 0", u.company_id, warehouseId, productId);
+      if (ws) return ws;
+      const anyWs = await one<{ c: number }>("SELECT COUNT(*) AS c FROM warehouse_stocks WHERE company_id = ? AND product_id = ? AND deleted = 0", u.company_id, productId);
+      const initialQty = (anyWs?.c ?? 0) === 0
+        ? ((await one<{ q: number }>("SELECT COALESCE(SUM(qty),0) AS q FROM stock_moves WHERE company_id = ? AND product_id = ? AND deleted = 0", u.company_id, productId))?.q ?? 0)
+        : 0;
+      const id = crypto.randomUUID();
+      const prod = await one<Row>("SELECT min_stock FROM products WHERE id = ? AND company_id = ?", productId, u.company_id);
+      const wh = await one<Row>("SELECT site_id FROM warehouses WHERE id = ? AND company_id = ?", warehouseId, u.company_id);
+      await env.DB.prepare("INSERT INTO warehouse_stocks (id, company_id, site_id, warehouse_id, product_id, qty, min_qty, active, created_at, updated_at, updated_by, deleted, rev) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)")
+        .bind(id, u.company_id, wh?.site_id ?? null, warehouseId, productId, initialQty, Number(prod?.min_stock ?? 0), 1, now, now, u.id).run();
+      return { id, qty: initialQty };
+    };
+
+    if (action === "request") {
+      if (!["draft"].includes(req.status)) throw gqlError("Solo se puede solicitar una requisición en borrador.");
+      await setStatus("requested", { requested_at: now, requested_by: u.id });
+    } else if (action === "approve") {
+      if (!["requested", "draft"].includes(req.status)) throw gqlError("La requisición no puede aprobarse en este estado.");
+      await setStatus("approved", { approved_at: now, approved_by: u.id, requested_at: req.requested_at ?? now, requested_by: req.requested_by ?? u.id });
+    } else if (action === "dispatch") {
+      if (!["approved", "requested"].includes(req.status)) throw gqlError("La requisición debe estar aprobada/solicitada para despachar.");
+      for (const ln of lines) {
+        const qty = Number(ln.qty_dispatched || ln.qty_requested || 0);
+        if (qty <= 0) continue;
+        await env.DB.prepare("UPDATE requisition_lines SET qty_dispatched = ?, updated_at = ?, updated_by = ? WHERE id = ? AND company_id = ?")
+          .bind(qty, now, u.id, ln.id, u.company_id).run();
+        const ws = await ensureWs(req.from_warehouse_id, ln.product_id);
+        await env.DB.prepare("UPDATE warehouse_stocks SET qty = qty - ?, updated_at = ?, updated_by = ? WHERE id = ? AND company_id = ?")
+          .bind(qty, now, u.id, ws.id, u.company_id).run();
+        const moveId = crypto.randomUUID();
+        await env.DB.prepare("INSERT INTO stock_moves (id, company_id, product_id, qty, kind, ref_id, date, unit_cost, notes, site_id, warehouse_id, warehouse_to_id, created_at, updated_at, updated_by, deleted, rev) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)")
+          .bind(moveId, u.company_id, ln.product_id, -qty, "traslado_salida", req.id, today(), 0, `Despacho requisición ${req.id.slice(0,8)}`, req.site_id ?? null, req.from_warehouse_id, req.to_warehouse_id, now, now, u.id, 0).run();
+      }
+      await setStatus("dispatched", { dispatched_at: now });
+    } else if (action === "receive") {
+      if (!["dispatched"].includes(req.status)) throw gqlError("La requisición debe estar despachada para recibirla.");
+      for (const ln of lines) {
+        const qty = Number(ln.qty_received || ln.qty_dispatched || ln.qty_requested || 0);
+        if (qty <= 0) continue;
+        await env.DB.prepare("UPDATE requisition_lines SET qty_received = ?, updated_at = ?, updated_by = ? WHERE id = ? AND company_id = ?")
+          .bind(qty, now, u.id, ln.id, u.company_id).run();
+        const ws = await ensureWs(req.to_warehouse_id, ln.product_id);
+        await env.DB.prepare("UPDATE warehouse_stocks SET qty = qty + ?, updated_at = ?, updated_by = ? WHERE id = ? AND company_id = ?")
+          .bind(qty, now, u.id, ws.id, u.company_id).run();
+        const moveId = crypto.randomUUID();
+        await env.DB.prepare("INSERT INTO stock_moves (id, company_id, product_id, qty, kind, ref_id, date, unit_cost, notes, site_id, warehouse_id, warehouse_to_id, created_at, updated_at, updated_by, deleted, rev) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)")
+          .bind(moveId, u.company_id, ln.product_id, qty, "traslado_entrada", req.id, today(), 0, `Recepción requisición ${req.id.slice(0,8)}`, req.site_id ?? null, req.to_warehouse_id, req.from_warehouse_id, now, now, u.id, 0).run();
+      }
+      await setStatus("received", { received_at: now });
+    } else if (action === "cancel") {
+      if (["received"].includes(req.status)) throw gqlError("No se puede cancelar una requisición recibida.");
+      await setStatus("cancelled");
+    } else {
+      throw gqlError("Acción inválida. Usa: request, approve, dispatch, receive, cancel");
+    }
+    return byId(ctx, "requisitions", a.id);
+  },
   login: async (_s, a, ctx) => {
     await loginLimited(ctx, a.email);
     const { token, expiresAt } = await login(a.email, a.password, a.deviceId ?? ctx.deviceId);
@@ -965,6 +1060,14 @@ export const resolvers: Record<string, Record<string, R>> = {
   WarehouseStock: {
     warehouse: (r, _a, ctx) => byId(ctx, "warehouses", r.warehouse_id),
     product: (r, _a, ctx) => byId(ctx, "products", r.product_id),
+  },
+  Requisition: {
+    fromWarehouse: (r, _a, ctx) => byId(ctx, "warehouses", r.from_warehouse_id),
+    toWarehouse: (r, _a, ctx) => byId(ctx, "warehouses", r.to_warehouse_id),
+    lines: (r, _a, ctx) => children(ctx, "requisition_lines", "requisition_id", r.id, "created_at"),
+  },
+  RequisitionLine: {
+    product: (l, _a, ctx) => byId(ctx, "products", l.product_id),
   },
 };
 

@@ -143,6 +143,36 @@ export const typeDefs = /* GraphQL */ `
     productCount: Int!
   }
 
+  type RequisitionLine {
+    id: ID!
+    requisitionId: String!
+    productId: String!
+    qtyRequested: Float!
+    qtyDispatched: Float!
+    qtyReceived: Float!
+    notes: String
+    product: Product
+  }
+
+  type Requisition {
+    id: ID!
+    siteId: String
+    fromWarehouseId: String!
+    toWarehouseId: String!
+    status: String!
+    requestedBy: String
+    approvedBy: String
+    notes: String
+    requestedAt: String
+    approvedAt: String
+    dispatchedAt: String
+    receivedAt: String
+    createdAt: String
+    fromWarehouse: Warehouse
+    toWarehouse: Warehouse
+    lines: [RequisitionLine!]!
+  }
+
   type StockMove {
     id: ID!
     productId: String
@@ -455,6 +485,8 @@ export const typeDefs = /* GraphQL */ `
     sites: [Site!]!
     warehouses(siteId: String): [Warehouse!]!
     warehouseStocks(warehouseId: ID, productId: ID, siteId: ID): [WarehouseStock!]!
+    requisitions(status: String, siteId: ID): [Requisition!]!
+    requisition(id: ID!): Requisition
     platformCompanies: [PlatformCompany!]!
     platformUsers: [User!]!
 
@@ -558,6 +590,7 @@ export const typeDefs = /* GraphQL */ `
     saveRecords(changes: [RecordInput!]!): [ID!]!
     "Borrado lógico (se propaga a todos los equipos)"
     deleteRecord(table: String!, id: ID!): Boolean!
+    processRequisition(id: ID!, action: String!): Requisition!
     login(email: String!, password: String!, deviceId: String): AuthPayload!
     "Auto-registro: crea una empresa nueva con su administrador (si ALLOW_SIGNUP=true)"
     signup(input: SignupInput!): AuthPayload!

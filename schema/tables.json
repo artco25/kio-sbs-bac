@@ -544,6 +544,79 @@
           "product_id"
         ]
       ]
+    },
+    "requisitions": {
+      "label": "Requisiciones",
+      "axis": "comercial",
+      "read": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
+      "write": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
+      "columns": {
+        "site_id": "text",
+        "from_warehouse_id": "text",
+        "to_warehouse_id": "text",
+        "status": "text",
+        "requested_by": "text",
+        "approved_by": "text",
+        "notes": "text",
+        "requested_at": "text",
+        "approved_at": "text",
+        "dispatched_at": "text",
+        "received_at": "text"
+      },
+      "indexes": [
+        [
+          "company_id",
+          "rev"
+        ],
+        [
+          "company_id",
+          "status"
+        ]
+      ]
+    },
+    "requisition_lines": {
+      "label": "Líneas de requisición",
+      "axis": "comercial",
+      "read": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
+      "write": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
+      "columns": {
+        "requisition_id": "text",
+        "product_id": "text",
+        "qty_requested": "real",
+        "qty_dispatched": "real",
+        "qty_received": "real",
+        "notes": "text"
+      },
+      "indexes": [
+        [
+          "company_id",
+          "rev"
+        ],
+        [
+          "company_id",
+          "requisition_id"
+        ]
+      ]
     }
   }
 }
