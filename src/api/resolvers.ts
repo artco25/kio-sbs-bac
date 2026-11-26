@@ -565,6 +565,12 @@ const Mutation: Record<string, R> = {
     if (ctx._saved) throw gqlError("Sólo se permite un saveRecords por solicitud");
     ctx._saved = true;
     const prepared = prepareAll(u, a.changes);
+    // Capture old stock_moves before upsert so we can compute deltas correctly.
+    const oldMoves = new Map<string, Row | null>();
+    for (const c of a.changes) {
+      if (c.table !== "stock_moves" || !c.row?.id) continue;
+      oldMoves.set(String(c.row.id), await one<Row>("SELECT * FROM stock_moves WHERE id = ? AND company_id = ? AND deleted = 0", c.row.id, u.company_id));
+    }
     try {
       await writeRows(env.DB, u.company_id, prepared);
     } catch (e: any) {
@@ -609,15 +615,11 @@ const Mutation: Record<string, R> = {
         }
       };
 
-      if (inputRow.id) {
-        const old = await one<Row>("SELECT * FROM stock_moves WHERE id = ? AND company_id = ?", inputRow.id, u.company_id);
-        if (old && !old.deleted) {
-          if (old.warehouse_id && old.product_id) await applyWs(old.warehouse_id, old.product_id, -Number(old.qty || 0));
-        }
-        if (whId) await applyWs(whId, prodId, qtyVal);
-      } else {
-        if (whId) await applyWs(whId, prodId, qtyVal);
+      const old = inputRow.id ? oldMoves.get(String(inputRow.id)) : null;
+      if (old && !old.deleted) {
+        if (old.warehouse_id && old.product_id) await applyWs(String(old.warehouse_id), String(old.product_id), -Number(old.qty || 0));
       }
+      if (whId) await applyWs(whId, prodId, qtyVal);
     }
     return prepared.map((p) => p.values.id);
   },
