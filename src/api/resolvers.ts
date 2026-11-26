@@ -178,13 +178,16 @@ const Query: Record<string, R> = {
   },
   products: async (_s, a, ctx) => {
     const u = guardRead(ctx, "products");
-    const sql = `SELECT p.*, COALESCE(m.qty, 0) AS stock FROM products p
+    const stockExpr = `CASE WHEN ws.product_id IS NOT NULL THEN COALESCE(ws.qty, 0) ELSE COALESCE(m.qty, 0) END`;
+    const sql = `SELECT p.*, ${stockExpr} AS stock FROM products p
       LEFT JOIN (SELECT product_id, SUM(qty) AS qty FROM stock_moves WHERE company_id = ?1 AND deleted = 0 GROUP BY product_id) m
         ON m.product_id = p.id
+      LEFT JOIN (SELECT product_id, SUM(qty) AS qty FROM warehouse_stocks WHERE company_id = ?1 AND deleted = 0 GROUP BY product_id) ws
+        ON ws.product_id = p.id
       WHERE p.company_id = ?1 AND p.deleted = 0
         AND (?2 IS NULL OR p.name LIKE ?2 OR p.sku LIKE ?2 OR p.barcode LIKE ?2)
         AND (?3 IS NULL OR p.category_id = ?3)
-        AND (?4 = 0 OR (p.track_stock = 1 AND COALESCE(m.qty, 0) <= p.min_stock))`;
+        AND (?4 = 0 OR (p.track_stock = 1 AND ${stockExpr} <= p.min_stock))`;
     const binds = [u.company_id, like(a.search), a.categoryId ?? null, a.lowStock ? 1 : 0];
     const [items, total] = await Promise.all([
       all(`${sql} ORDER BY p.name, p.id LIMIT ?5 OFFSET ?6`, ...binds, limit(a.limit), offset(a.offset)),
@@ -855,16 +858,19 @@ export const resolvers: Record<string, Record<string, R>> = {
   },
   StockMove: { product: (m, _a, ctx) => byId(ctx, "products", m.product_id) },
   Product: {
-    stock: async (p, _a, ctx) =>
-      p.stock ??
-      (
-        await one<{ q: number }>(
-          "SELECT COALESCE(SUM(qty), 0) AS q FROM stock_moves WHERE company_id = ? AND product_id = ? AND deleted = 0",
-          ctx.user!.company_id,
-          p.id,
-        )
-      )?.q ??
-      0,
+    stock: async (p, _a, ctx) => {
+      if (p.stock != null) return p.stock;
+      const cid = ctx.user!.company_id;
+      const ws = await one<{ q: number; c: number }>(
+        "SELECT COALESCE(SUM(qty),0) AS q, COUNT(*) AS c FROM warehouse_stocks WHERE company_id = ? AND product_id = ? AND deleted = 0",
+        cid, p.id,
+      );
+      if ((ws?.c ?? 0) > 0) return ws?.q ?? 0;
+      return (await one<{ q: number }>(
+        "SELECT COALESCE(SUM(qty), 0) AS q FROM stock_moves WHERE company_id = ? AND product_id = ? AND deleted = 0",
+        cid, p.id,
+      ))?.q ?? 0;
+    },
     category: (p, _a, ctx) => byId(ctx, "categories", p.category_id),
   },
   Sale: {
