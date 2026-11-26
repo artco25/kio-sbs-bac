@@ -76,7 +76,21 @@
         "track_stock": "bool",
         "min_stock": "real",
         "available_pos": "bool",
-        "active": "bool"
+        "active": "bool",
+        "description": "text",
+        "short_description": "text",
+        "brand": "text",
+        "weight": "real",
+        "volume": "real",
+        "cum": "text",
+        "color": "text",
+        "flavor": "text",
+        "line1": "text",
+        "line2": "text",
+        "line3": "text",
+        "line4": "text",
+        "line5": "text",
+        "line6": "text"
       },
       "indexes": [
         [

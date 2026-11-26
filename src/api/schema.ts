@@ -203,6 +203,20 @@ export const typeDefs = /* GraphQL */ `
     availablePos: Boolean!
     active: Boolean!
     stock: Float!
+    description: String
+    shortDescription: String
+    brand: String
+    weight: Float!
+    volume: Float!
+    cum: String
+    color: String
+    flavor: String
+    line1: String
+    line2: String
+    line3: String
+    line4: String
+    line5: String
+    line6: String
     category: Category
   }
   type ProductPage {
