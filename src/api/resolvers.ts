@@ -557,7 +557,13 @@ const Mutation: Record<string, R> = {
   },
   logout: async (_s, _a, ctx) => {
     const u = requireUser(ctx.user);
-    await env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(u.session_id).run();
+    const ops = [
+      env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(u.session_id),
+    ];
+    if (u.device_id) {
+      ops.push(env.DB.prepare("UPDATE devices SET last_sync_at = NULL, updated_at = ? WHERE id = ? AND company_id = ?").bind(nowIso(), u.device_id, u.company_id));
+    }
+    await env.DB.batch(ops);
     return true;
   },
   changePassword: async (_s, a, ctx) => {
