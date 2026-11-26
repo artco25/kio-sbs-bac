@@ -553,6 +553,42 @@ const Mutation: Record<string, R> = {
       if (msg.includes("UNIQUE constraint failed")) throw gqlError("Ya existe un registro con esos datos.");
       throw gqlError("Error interno al guardar. " + msg.slice(0, 120), "INTERNAL");
     }
+    // Sync stock_moves -> warehouse_stocks for new moves with warehouse_id
+    for (let i = 0; i < prepared.length; i++) {
+      const p = prepared[i];
+      const inputRow = (a.changes[i]?.row ?? {}) as Row;
+      if (p.table !== "stock_moves") continue;
+      const whId = p.values["warehouse_id"];
+      const prodId = p.values["product_id"];
+      const qtyVal = Number(p.values["qty"] || 0);
+      if (!whId || !prodId || !qtyVal) continue;
+      // Only auto-sync on create (no id provided by client)
+      if (inputRow.id) continue;
+      const existing = await one<Row>(
+        "SELECT id, qty FROM warehouse_stocks WHERE company_id = ? AND warehouse_id = ? AND product_id = ? AND deleted = 0",
+        u.company_id, whId, prodId,
+      );
+      const now = nowIso();
+      if (existing) {
+        await env.DB.prepare(
+          "UPDATE warehouse_stocks SET qty = qty + ?, updated_at = ?, updated_by = ? WHERE id = ? AND company_id = ?",
+        ).bind(qtyVal, now, u.id, existing.id, u.company_id).run();
+      } else {
+        const anyWs = await one<{ c: number }>(
+          "SELECT COUNT(*) AS c FROM warehouse_stocks WHERE company_id = ? AND product_id = ? AND deleted = 0",
+          u.company_id, prodId,
+        );
+        const initialQty = (anyWs?.c ?? 0) === 0
+          ? ((await one<{ q: number }>("SELECT COALESCE(SUM(qty),0) AS q FROM stock_moves WHERE company_id = ? AND product_id = ? AND deleted = 0", u.company_id, prodId))?.q ?? qtyVal)
+          : qtyVal;
+        const wsId = crypto.randomUUID();
+        const prod = await one<Row>("SELECT min_stock, site_id FROM products WHERE id = ? AND company_id = ?", prodId, u.company_id);
+        const wh = await one<Row>("SELECT site_id FROM warehouses WHERE id = ? AND company_id = ?", whId, u.company_id);
+        await env.DB.prepare(
+          "INSERT INTO warehouse_stocks (id, company_id, site_id, warehouse_id, product_id, qty, min_qty, active, created_at, updated_at, updated_by, deleted, rev) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)",
+        ).bind(wsId, u.company_id, wh?.site_id ?? prod?.site_id ?? null, whId, prodId, initialQty, Number(prod?.min_stock ?? 0), 1, now, now, u.id).run();
+      }
+    }
     return prepared.map((p) => p.values.id);
   },
   deleteRecord: async (_s, a, ctx) => {

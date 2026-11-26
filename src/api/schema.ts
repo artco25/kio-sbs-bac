@@ -73,6 +73,7 @@ export const typeDefs = /* GraphQL */ `
     siteId: String
     active: Boolean!
     isDefault: Boolean!
+    storageCapacity: Float!
     site: Site
   }
 

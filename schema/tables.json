@@ -489,7 +489,8 @@
         "code": "text",
         "kind": "text",
         "active": "bool",
-        "is_default": "bool"
+        "is_default": "bool",
+        "storage_capacity": "real"
       },
       "indexes": [
         [
