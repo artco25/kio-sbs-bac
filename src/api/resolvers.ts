@@ -629,6 +629,11 @@ const Mutation: Record<string, R> = {
     const req = await one<Row>("SELECT * FROM requisitions WHERE id = ? AND company_id = ? AND deleted = 0", a.id, u.company_id);
     if (!req) throw gqlError("Requisición no encontrada", "NOT_FOUND");
     const action = String(a.action || "").toLowerCase();
+    const role = u.role;
+    if (action === "approve" && !["admin", "contador"].includes(role)) throw gqlError("Solo admin o contador puede aprobar requisiciones.");
+    if (action === "dispatch" && !["admin", "contador"].includes(role)) throw gqlError("Solo admin o contador puede despachar requisiciones.");
+    if (action === "receive" && !["admin", "contador", "cajero", "vendedor"].includes(role)) throw gqlError("No tienes permiso para recibir requisiciones.");
+    if (action === "cancel" && !["admin", "contador"].includes(role)) throw gqlError("Solo admin o contador puede cancelar requisiciones.");
     const now = nowIso();
     const lines = await all<Row>("SELECT * FROM requisition_lines WHERE requisition_id = ? AND company_id = ? AND deleted = 0", a.id, u.company_id);
     if (!lines.length && action !== "cancel") throw gqlError("La requisición no tiene líneas.");
