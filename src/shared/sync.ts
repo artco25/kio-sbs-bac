@@ -152,7 +152,10 @@ export function prepareChange(user: SyncUser, table: string, row: Record<string,
   }
 
   for (const col of NON_NEGATIVE[table] ?? []) {
-    if (typeof values[col] === "number" && (values[col] as number) < 0) return { table, id, reason: `${col} no puede ser negativo` };
+    if (typeof values[col] === "number" && (values[col] as number) < 0) {
+      if (table === "payments" && col === "amount" && values.kind === "reembolso") continue;
+      return { table, id, reason: `${col} no puede ser negativo` };
+    }
   }
   if (table === "sale_lines" && typeof values.discount_pct === "number" && (values.discount_pct < 0 || values.discount_pct > 100)) {
     return { table, id, reason: "El descuento debe estar entre 0 y 100 %" };
