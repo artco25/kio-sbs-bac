@@ -76,6 +76,18 @@ export const typeDefs = /* GraphQL */ `
     site: Site
   }
 
+  type WarehouseStock {
+    id: ID!
+    siteId: String
+    warehouseId: String!
+    productId: String!
+    qty: Float!
+    minQty: Float!
+    active: Boolean!
+    warehouse: Warehouse
+    product: Product
+  }
+
   type Me {
     user: User!
     company: Company!
@@ -435,6 +447,7 @@ export const typeDefs = /* GraphQL */ `
     devices: [Device!]!
     sites: [Site!]!
     warehouses(siteId: String): [Warehouse!]!
+    warehouseStocks(warehouseId: String, productId: String, siteId: String): [WarehouseStock!]!
     platformCompanies: [PlatformCompany!]!
     platformUsers: [User!]!
 
@@ -474,6 +487,7 @@ export const typeDefs = /* GraphQL */ `
     roleId: ID
     posTerminal: String
     employeeId: String
+    siteId: ID
   }
   input UserUpdate {
     name: String
@@ -484,6 +498,7 @@ export const typeDefs = /* GraphQL */ `
     password: String
     posTerminal: String
     employeeId: String
+    siteId: ID
   }
   input PlatformUserInput {
     name: String!
@@ -545,6 +560,7 @@ export const typeDefs = /* GraphQL */ `
     changePassword(current: String!, next: String!): Boolean!
     createUser(input: UserInput!): User!
     updateUser(id: ID!, input: UserUpdate!): User!
+    assignDeviceSite(id: ID!, siteId: ID): Device!
     updateCompany(input: CompanyInput!): Company!
     createPlatformUser(input: PlatformUserInput!): User!
     updatePlatformUser(id: ID!, input: PlatformUserUpdate!): User!

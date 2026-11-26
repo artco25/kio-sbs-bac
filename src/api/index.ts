@@ -1,7 +1,9 @@
 // Worker "kio-sbs-api": Express + GraphQL (consultas, autenticación, administración y panel KIO SBS).
 import { httpServerHandler } from "cloudflare:node";
-import { buildSchema } from "graphql";
-import { addResolvers, createApp } from "../shared/http";
+import { buildSchema, execute } from "graphql";
+import { createHandler } from "graphql-http/lib/use/express";
+import { addResolvers, costLimit, createApp, snakeFieldResolver, type Ctx } from "../shared/http";
+import { syncSchema } from "../sync/schema";
 import { mountProvision } from "./provision";
 import { resolvers } from "./resolvers";
 import { typeDefs } from "./schema";
@@ -28,10 +30,25 @@ const SWAGGER_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
+const syncHandler = createHandler<Ctx>({
+  schema: syncSchema,
+  context: (req) => {
+    const raw = req.raw as any;
+    return {
+      user: raw.user ?? null,
+      ip: (raw.headers["cf-connecting-ip"] as string) ?? null,
+      deviceId: ((raw.headers["x-device-id"] as string) ?? "").slice(0, 64) || null,
+    };
+  },
+  validationRules: (_req, _args, specified) => [...specified, costLimit(8, 12, 400)],
+  execute: (args) => execute({ ...args, fieldResolver: snakeFieldResolver }),
+});
+
 const app = createApp("kio-sbs-api", schema, (a) => {
   mountProvision(a);
   a.get("/openapi.json", (_req, res) => res.json(openapi));
   a.get("/docs", (_req, res) => res.type("html").send(SWAGGER_HTML));
+  a.all(["/sync", "/sync/graphql"], syncHandler);
 });
 
 app.listen(8080);

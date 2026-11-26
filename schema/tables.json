@@ -505,6 +505,44 @@
           "active"
         ]
       ]
+    },
+    "warehouse_stocks": {
+      "label": "Existencias por bodega",
+      "axis": "comercial",
+      "read": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
+      "write": [
+        "admin",
+        "contador",
+        "cajero",
+        "vendedor"
+      ],
+      "columns": {
+        "site_id": "text",
+        "warehouse_id": "text",
+        "product_id": "text",
+        "qty": "real",
+        "min_qty": "real",
+        "active": "bool"
+      },
+      "indexes": [
+        [
+          "company_id",
+          "rev"
+        ],
+        [
+          "company_id",
+          "warehouse_id"
+        ],
+        [
+          "company_id",
+          "product_id"
+        ]
+      ]
     }
   }
 }

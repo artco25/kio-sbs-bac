@@ -97,6 +97,21 @@ const Query: Record<string, R> = {
       a.siteId ?? null,
     );
   },
+  warehouseStocks: async (_s, a, ctx) => {
+    const u = guardRead(ctx, "warehouse_stocks");
+    return all(
+      `SELECT * FROM warehouse_stocks
+       WHERE company_id = ? AND deleted = 0
+         AND (? IS NULL OR warehouse_id = ?)
+         AND (? IS NULL OR product_id = ?)
+         AND (? IS NULL OR site_id = ?)
+       ORDER BY updated_at DESC`,
+      u.company_id,
+      a.warehouseId ?? null, a.warehouseId ?? null,
+      a.productId ?? null, a.productId ?? null,
+      a.siteId ?? null, a.siteId ?? null,
+    );
+  },
   platformCompanies: async (_s, _a, ctx) => {
     requirePlatform(ctx.user, 'viewer');
     return all(`
@@ -895,6 +910,10 @@ export const resolvers: Record<string, Record<string, R>> = {
   Novelty: { employee: (n, _a, ctx) => byId(ctx, "employees", n.employee_id) },
   Device: { user: (d, _a, ctx) => byId(ctx, "users", d.user_id) },
   Warehouse: { site: (w, _a, ctx) => byId(ctx, "sites", w.site_id) },
+  WarehouseStock: {
+    warehouse: (r, _a, ctx) => byId(ctx, "warehouses", r.warehouse_id),
+    product: (r, _a, ctx) => byId(ctx, "products", r.product_id),
+  },
 };
 
 function partnerBalance(ctx: Ctx, partnerId: string) {

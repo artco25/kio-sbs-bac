@@ -51,7 +51,7 @@ export function addResolvers(schema: GraphQLSchema, map: Record<string, Record<s
 const snake = (s: string) => s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 
 /** camelCase en GraphQL ↔ snake_case en D1, sin escribir un resolver por campo. */
-const snakeFieldResolver: GraphQLFieldResolver<any, Ctx> = (src, args, ctx, info) => {
+export const snakeFieldResolver: GraphQLFieldResolver<any, Ctx> = (src, args, ctx, info) => {
   if (src && typeof src === "object" && !(info.fieldName in src)) {
     const key = snake(info.fieldName);
     if (key in src) return src[key];
