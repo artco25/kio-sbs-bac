@@ -63,6 +63,10 @@ const typeDefs = /* GraphQL */ `
     appVersion: String
     pending: Int
     cursor: Int
+    terminalCode: String
+    section: String
+    macAddress: String
+    hardwareId: String
   }
 
   type Query {
@@ -82,14 +86,22 @@ async function touchDevice(ctx: Ctx, d: Record<string, unknown> | undefined) {
   // Sólo el equipo con el que se inició sesión: evita llenar la tabla con ids aleatorios.
   if (u.device_id && u.device_id !== d.id) return;
   const s = (v: unknown, n = 80) => (v == null ? null : String(v).slice(0, n));
+  const terminalCode = s(d.terminalCode, 40);
+  const section = s(d.section, 40);
+  const macAddress = s(d.macAddress, 64);
+  const hardwareId = s(d.hardwareId, 128);
   await env.DB.prepare(
-    `INSERT INTO devices (id, company_id, user_id, name, platform, app_version, last_cursor, pending, last_sync_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO devices (id, company_id, user_id, name, platform, app_version, last_cursor, pending, last_sync_at, terminal_code, section, mac_address, hardware_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(id) DO UPDATE SET user_id = excluded.user_id, name = excluded.name, platform = excluded.platform,
-       app_version = excluded.app_version, last_cursor = excluded.last_cursor, pending = excluded.pending, last_sync_at = excluded.last_sync_at
+       app_version = excluded.app_version, last_cursor = excluded.last_cursor, pending = excluded.pending, last_sync_at = excluded.last_sync_at,
+       terminal_code = COALESCE(NULLIF(excluded.terminal_code,''), devices.terminal_code),
+       section = COALESCE(NULLIF(excluded.section,''), devices.section),
+       mac_address = COALESCE(NULLIF(excluded.mac_address,''), devices.mac_address),
+       hardware_id = COALESCE(NULLIF(excluded.hardware_id,''), devices.hardware_id)
      WHERE devices.company_id = excluded.company_id`,
   )
-    .bind(d.id, u.company_id, u.id, s(d.name), s(d.platform, 20), s(d.appVersion, 20), Number(d.cursor) || 0, Number(d.pending) || 0, nowIso())
+    .bind(d.id, u.company_id, u.id, s(d.name), s(d.platform, 20), s(d.appVersion, 20), Number(d.cursor) || 0, Number(d.pending) || 0, nowIso(), terminalCode, section, macAddress, hardwareId)
     .run();
 }
 

@@ -14,10 +14,10 @@
         "db:migrate": "wrangler d1 migrations apply kio-sbs --local -c wrangler.api.jsonc",
         "db:migrate:remote": "wrangler d1 migrations apply kio-sbs --remote -c wrangler.api.jsonc",
         "deploy:api": "wrangler deploy -c wrangler.api.jsonc",
-        "deploy:sync": "wrangler deploy -c wrangler.sync.jsonc",
         "deploy": "npm run typecheck && npm run db:migrate:remote && npm run deploy:api",
         "smoke": "API=http://127.0.0.1:8797 SYNC=http://127.0.0.1:8798 bash scripts/smoke.sh",
-        "deploy:all": "npm run typecheck && npm run db:migrate:remote && npm run deploy:api && npm run deploy:sync"
+        "deploy:sync": "wrangler deploy -c wrangler.sync.jsonc",
+        "deploy:all": "npm run typecheck && npm run db:migrate:remote && npm run deploy:api"
     },
     "dependencies": {
         "express": "^5.1.0",

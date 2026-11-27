@@ -2,6 +2,7 @@
 import { httpServerHandler } from "cloudflare:node";
 import { buildSchema, execute } from "graphql";
 import { createHandler } from "graphql-http/lib/use/express";
+import { nowIso } from "../shared/crypto";
 import { addResolvers, costLimit, createApp, snakeFieldResolver, type Ctx } from "../shared/http";
 import { syncSchema } from "../sync/schema";
 import { mountProvision } from "./provision";
@@ -52,4 +53,12 @@ const app = createApp("kio-sbs-api", schema, (a) => {
 });
 
 app.listen(8080);
-export default httpServerHandler({ port: 8080 });
+const handler = httpServerHandler({ port: 8080 });
+
+/** Un solo Worker: GraphQL + /sync/graphql + limpieza diaria de sesiones vencidas. */
+export default {
+  fetch: handler.fetch,
+  async scheduled(_event: ScheduledController, workerEnv: { DB: D1Database }) {
+    await workerEnv.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(nowIso()).run();
+  },
+} satisfies ExportedHandler<{ DB: D1Database }>;

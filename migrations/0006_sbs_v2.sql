@@ -147,6 +147,14 @@ CREATE TABLE IF NOT EXISTS products (
   min_stock REAL NOT NULL DEFAULT 0,
   available_pos INTEGER NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 0,
+  description TEXT,
+  short_description TEXT,
+  brand TEXT,
+  weight REAL NOT NULL DEFAULT 0,
+  volume REAL NOT NULL DEFAULT 0,
+  cum TEXT,
+  color TEXT,
+  flavor TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_by TEXT,
@@ -166,6 +174,9 @@ CREATE TABLE IF NOT EXISTS stock_moves (
   date TEXT,
   unit_cost REAL NOT NULL DEFAULT 0,
   notes TEXT,
+  site_id TEXT,
+  warehouse_id TEXT,
+  warehouse_to_id TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_by TEXT,
@@ -189,6 +200,7 @@ CREATE TABLE IF NOT EXISTS pos_sessions (
   difference REAL NOT NULL DEFAULT 0,
   status TEXT,
   notes TEXT,
+  site_id TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_by TEXT,
@@ -217,6 +229,7 @@ CREATE TABLE IF NOT EXISTS sales (
   kitchen_status TEXT,
   table_ref TEXT,
   notes TEXT,
+  site_id TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_by TEXT,
@@ -240,6 +253,7 @@ CREATE TABLE IF NOT EXISTS sale_lines (
   tax REAL NOT NULL DEFAULT 0,
   total REAL NOT NULL DEFAULT 0,
   sequence INTEGER NOT NULL DEFAULT 0,
+  site_id TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_by TEXT,
@@ -263,6 +277,7 @@ CREATE TABLE IF NOT EXISTS payments (
   reference TEXT,
   user_id TEXT,
   notes TEXT,
+  site_id TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_by TEXT,
@@ -289,6 +304,7 @@ CREATE TABLE IF NOT EXISTS expenses (
   approved_at TEXT,
   receipt_ref TEXT,
   notes TEXT,
+  site_id TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_by TEXT,
@@ -423,6 +439,135 @@ CREATE TABLE IF NOT EXISTS payroll_params (
   rev INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS ix_payroll_params_rev ON payroll_params(company_id, rev);
+
+-- Sedes
+CREATE TABLE IF NOT EXISTS sites (
+  id TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL REFERENCES companies(id),
+  name TEXT,
+  code TEXT,
+  kind TEXT,
+  business_type TEXT,
+  catalog_mode TEXT,
+  address TEXT,
+  city TEXT,
+  phone TEXT,
+  active INTEGER NOT NULL DEFAULT 0,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_by TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  rev INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_sites_rev ON sites(company_id, rev);
+
+-- Bodegas
+CREATE TABLE IF NOT EXISTS warehouses (
+  id TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL REFERENCES companies(id),
+  site_id TEXT,
+  name TEXT,
+  code TEXT,
+  kind TEXT,
+  active INTEGER NOT NULL DEFAULT 0,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  storage_capacity REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_by TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  rev INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_warehouses_rev ON warehouses(company_id, rev);
+
+-- Existencias por bodega
+CREATE TABLE IF NOT EXISTS warehouse_stocks (
+  id TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL REFERENCES companies(id),
+  site_id TEXT,
+  warehouse_id TEXT,
+  product_id TEXT,
+  qty REAL NOT NULL DEFAULT 0,
+  min_qty REAL NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_by TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  rev INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_warehouse_stocks_rev ON warehouse_stocks(company_id, rev);
+
+-- Requisiciones
+CREATE TABLE IF NOT EXISTS requisitions (
+  id TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL REFERENCES companies(id),
+  site_id TEXT,
+  from_warehouse_id TEXT,
+  to_warehouse_id TEXT,
+  status TEXT,
+  requested_by TEXT,
+  approved_by TEXT,
+  notes TEXT,
+  requested_at TEXT,
+  approved_at TEXT,
+  dispatched_at TEXT,
+  received_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_by TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  rev INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_requisitions_rev ON requisitions(company_id, rev);
+
+-- Líneas de requisición
+CREATE TABLE IF NOT EXISTS requisition_lines (
+  id TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL REFERENCES companies(id),
+  requisition_id TEXT,
+  product_id TEXT,
+  qty_requested REAL NOT NULL DEFAULT 0,
+  qty_dispatched REAL NOT NULL DEFAULT 0,
+  qty_received REAL NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_by TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  rev INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_requisition_lines_rev ON requisition_lines(company_id, rev);
+
+-- Etiquetas
+CREATE TABLE IF NOT EXISTS tags (
+  id TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL REFERENCES companies(id),
+  name TEXT,
+  color TEXT,
+  active INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_by TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  rev INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_tags_rev ON tags(company_id, rev);
+
+-- Etiquetas de producto
+CREATE TABLE IF NOT EXISTS product_tags (
+  id TEXT PRIMARY KEY,
+  company_id TEXT NOT NULL REFERENCES companies(id),
+  product_id TEXT,
+  tag_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_by TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  rev INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS ix_product_tags_rev ON product_tags(company_id, rev);
 
 -- Índices de consulta (parciales: sólo filas vivas)
 CREATE INDEX IF NOT EXISTS ix_pay_recv ON payments(company_id, sale_id, amount) WHERE deleted = 0 AND sale_id IS NOT NULL;

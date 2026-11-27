@@ -84,13 +84,7 @@
         "volume": "real",
         "cum": "text",
         "color": "text",
-        "flavor": "text",
-        "line1": "text",
-        "line2": "text",
-        "line3": "text",
-        "line4": "text",
-        "line5": "text",
-        "line6": "text"
+        "flavor": "text"
       },
       "indexes": [
         [
@@ -181,6 +175,12 @@
         "total": "real",
         "kitchen_status": "text",
         "table_ref": "text",
+        "delivery_user_id": "text",
+        "delivery_rider_name": "text",
+        "delivery_address": "text",
+        "delivery_status": "text",
+        "delivery_collected_at": "text",
+        "delivery_collected_amount": "real",
         "notes": "text",
         "site_id": "text"
       },
@@ -631,6 +631,33 @@
           "requisition_id"
         ]
       ]
+    },
+    "tags": {
+      "label": "Etiquetas",
+      "axis": "comercial",
+      "read": "*",
+      "write": [
+        "admin",
+        "contador"
+      ],
+      "columns": {
+        "name": "text",
+        "color": "text",
+        "active": "bool"
+      }
+    },
+    "product_tags": {
+      "label": "Etiquetas de producto",
+      "axis": "comercial",
+      "read": "*",
+      "write": [
+        "admin",
+        "contador"
+      ],
+      "columns": {
+        "product_id": "text",
+        "tag_id": "text"
+      }
     }
   }
 }

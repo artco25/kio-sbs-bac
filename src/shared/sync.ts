@@ -60,7 +60,9 @@ const LOCK_FOR_OPERATORS: Record<string, string> = {
   expenses: "t.status IN ('borrador', 'enviada')",
 };
 /** Columnas que un operador sí puede cambiar aunque el documento esté en estado final (pantalla de cocina). */
-const ALWAYS_EDITABLE: Record<string, string[]> = { sales: ["kitchen_status"] };
+const ALWAYS_EDITABLE: Record<string, string[]> = {
+  sales: ["kitchen_status", "delivery_status", "delivery_collected_at", "delivery_collected_amount"],
+};
 /** Columnas que sólo administrador/contador pueden fijar. */
 const APPROVER_ONLY: Record<string, string[]> = {
   partners: ["credit_limit", "blocked", "seller_id", "payment_term_days"],
@@ -76,6 +78,7 @@ const NON_NEGATIVE: Record<string, string[]> = {
   payments: ["amount"],
   expenses: ["amount", "tax"],
   products: ["price", "cost"],
+  warehouse_stocks: ["qty", "min_qty"],
   partners: ["credit_limit"],
   employees: ["salary"],
 };
@@ -124,13 +127,43 @@ function normTs(v: unknown, fallback: string) {
   return t > Date.now() ? fallback : new Date(t).toISOString();
 }
 
+const truthy = (v: unknown) => v === true || v === 1 || v === "1" || v === "true";
+
+/**
+ * Desde el POS se permite crear clientes básicos aunque el rol tenga "Contactos" en solo lectura.
+ * Sólo vale para filas de cliente (`is_customer=1`, nunca proveedor) y sin campos de cartera/cupo.
+ */
+function posCustomerWrite(user: SyncUser, table: string, row: Record<string, unknown>) {
+  return (
+    table === "partners" &&
+    !canWrite(user, table) &&
+    canWrite(user, "pos_sessions") &&
+    truthy(row.is_customer) &&
+    !truthy(row.is_supplier) &&
+    !truthy(row.deleted) &&
+    !("blocked" in row) &&
+    !("credit_limit" in row) &&
+    !("payment_term_days" in row) &&
+    !("seller_id" in row)
+  );
+}
+
 /** Valida un cambio entrante: tabla, rol, columnas en lista blanca (sólo las presentes) y reglas de negocio. */
 export function prepareChange(user: SyncUser, table: string, row: Record<string, unknown>): PreparedRow | Rejection {
   const id = typeof row?.id === "string" ? row.id : null;
   if (!isTable(table)) return { table: String(table).slice(0, 40), id, reason: "Tabla desconocida" };
   const def = TABLES[table];
-  if (!canWrite(user, table)) return { table, id, reason: `Tu rol no puede modificar ${def.label}` };
+  const quickCustomer = posCustomerWrite(user, table, row);
+  if (!canWrite(user, table) && !quickCustomer) return { table, id, reason: `Tu rol no puede modificar ${def.label}` };
   if (!id || !ID_RE.test(id)) return { table, id, reason: "id inválido" };
+  if (quickCustomer) {
+    const allowed = new Set(["name", "doc_type", "doc_number", "email", "phone", "address", "city", "is_customer", "is_supplier", "notes", "deleted"]);
+    for (const col of Object.keys(row)) {
+      if (col in def.columns && !allowed.has(col)) {
+        return { table, id, reason: "Desde caja sólo se pueden crear clientes básicos" };
+      }
+    }
+  }
 
   const approver = isApprover(user.role);
   const now = nowIso();

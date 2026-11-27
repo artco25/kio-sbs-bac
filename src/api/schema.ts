@@ -33,6 +33,13 @@ export const typeDefs = /* GraphQL */ `
     siteId: String
   }
 
+  "Datos mínimos del usuario para asignar domiciliarios desde el POS"
+  type PosUser {
+    id: ID!
+    name: String!
+    role: String!
+  }
+
   "Rol personalizado de la empresa: suites a las que entra y permiso por tabla ('r' leer, 'w' escribir)"
   type CustomRole {
     id: ID!
@@ -143,6 +150,20 @@ export const typeDefs = /* GraphQL */ `
     productCount: Int!
   }
 
+  type Tag {
+    id: ID!
+    name: String
+    color: String
+    active: Boolean!
+  }
+
+  type ProductTag {
+    id: ID!
+    productId: String!
+    tagId: String!
+    tag: Tag
+  }
+
   type RequisitionLine {
     id: ID!
     requisitionId: String!
@@ -211,13 +232,8 @@ export const typeDefs = /* GraphQL */ `
     cum: String
     color: String
     flavor: String
-    line1: String
-    line2: String
-    line3: String
-    line4: String
-    line5: String
-    line6: String
     category: Category
+    tags: [Tag!]!
   }
   type ProductPage {
     total: Int!
@@ -236,6 +252,12 @@ export const typeDefs = /* GraphQL */ `
     siteId: String
     kitchenStatus: String
     tableRef: String
+    deliveryUserId: String
+    deliveryRiderName: String
+    deliveryAddress: String
+    deliveryStatus: String
+    deliveryCollectedAt: String
+    deliveryCollectedAmount: Float
     subtotal: Float!
     discountTotal: Float!
     taxTotal: Float!
@@ -469,6 +491,10 @@ export const typeDefs = /* GraphQL */ `
     lastCursor: Int!
     pending: Int!
     siteId: String
+    terminalCode: String
+    section: String
+    macAddress: String
+    hardwareId: String
     user: User
   }
 
@@ -492,6 +518,7 @@ export const typeDefs = /* GraphQL */ `
     me: Me!
     company: Company!
     users: [User!]!
+    posUsers: [PosUser!]!
     roles: [CustomRole!]!
     suites: [SuiteInfo!]!
     "true si el auto-registro de empresas está habilitado"
@@ -508,6 +535,8 @@ export const typeDefs = /* GraphQL */ `
     partners(search: String, customers: Boolean, suppliers: Boolean, withBalance: Boolean, limit: Int, offset: Int): PartnerPage!
     partner(id: ID!): Partner
     categories: [Category!]!
+    tags: [Tag!]!
+    productTags(productId: ID): [ProductTag!]!
     stockMoves(productId: ID, kind: String, limit: Int): [StockMove!]!
     products(search: String, categoryId: ID, lowStock: Boolean, limit: Int, offset: Int): ProductPage!
     product(id: ID!): Product
@@ -516,7 +545,7 @@ export const typeDefs = /* GraphQL */ `
     "Ventas a crédito con saldo pendiente (cartera)"
     receivables(partnerId: ID, overdueOnly: Boolean): [Sale!]!
 
-    posSessions(status: String, limit: Int): [PosSession!]!
+    posSessions(status: String, terminal: String, limit: Int): [PosSession!]!
     posSession(id: ID!): PosSession
 
     payments(kind: String, from: String, to: String, limit: Int): [Payment!]!
@@ -584,6 +613,10 @@ export const typeDefs = /* GraphQL */ `
     name: String!
     email: String!
     password: String!
+    businessType: String
+    hasCedi: Boolean
+    storeCount: Int
+    address: String
   }
   input CompanyInput {
     name: String
@@ -619,6 +652,10 @@ export const typeDefs = /* GraphQL */ `
     updateCompany(input: CompanyInput!): Company!
     createPlatformUser(input: PlatformUserInput!): User!
     updatePlatformUser(id: ID!, input: PlatformUserUpdate!): User!
+    "Solo super admin de plataforma: elimina empresa y datos relacionados"
+    deleteCompany(id: ID!): Boolean!
+    "Solo super admin de plataforma: entra a una empresa"
+    switchCompany(companyId: ID!): AuthPayload!
     approveExpense(id: ID!, approve: Boolean!, notes: String): Expense!
     approveLeave(id: ID!, approve: Boolean!, notes: String): LeaveRequest!
   }

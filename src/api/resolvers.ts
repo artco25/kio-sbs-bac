@@ -1,7 +1,7 @@
 import { authenticate, gqlError, login, normEmail, requireUser, validatePassword, type AuthUser } from "../shared/auth";
 import { parseJson, SUITE_KEYS, SUITES } from "../shared/suites";
 import { createTenant } from "./provision";
-import { hashPassword, nowIso, uuid, verifyPassword } from "../shared/crypto";
+import { hashPassword, nowIso, randomHex, sha256Hex, uuid, verifyPassword } from "../shared/crypto";
 import { all, byId, cached, children, like, limit, offset, one, patchRow, today, USER_COLS, type Row } from "../shared/data";
 import { env } from "../shared/env";
 import type { Ctx } from "../shared/http";
@@ -73,6 +73,11 @@ const Query: Record<string, R> = {
   users: async (_s, _a, ctx) => {
     const u = requireUser(ctx.user, ["admin"]);
     return all(`${USER_SELECT} WHERE u.company_id = ? ORDER BY u.name`, u.company_id);
+  },
+  // Para el POS: sólo nombre/rol, sin correo ni datos sensibles.
+  posUsers: async (_s, _a, ctx) => {
+    const u = requireUser(ctx.user);
+    return all("SELECT id, name, role FROM users WHERE company_id = ? AND active = 1 ORDER BY name", u.company_id);
   },
   roles: async (_s, _a, ctx) => {
     const u = requireUser(ctx.user, ["admin"]);
@@ -181,6 +186,17 @@ const Query: Record<string, R> = {
       u.company_id,
     );
   },
+  tags: async (_s, _a, ctx) => {
+    const u = guardRead(ctx, "tags");
+    return all(`SELECT * FROM tags WHERE company_id = ? AND deleted = 0 ORDER BY name`, u.company_id);
+  },
+  productTags: async (_s, a, ctx) => {
+    const u = guardRead(ctx, "product_tags");
+    return all(
+      `SELECT pt.* FROM product_tags pt WHERE pt.company_id = ? AND pt.deleted = 0 AND (? IS NULL OR pt.product_id = ?) ORDER BY pt.created_at`,
+      u.company_id, a.productId ?? null, a.productId ?? null,
+    );
+  },
   stockMoves: async (_s, a, ctx) => {
     const u = guardRead(ctx, "stock_moves");
     return all(
@@ -276,11 +292,15 @@ const Query: Record<string, R> = {
       `SELECT ps.*,
          (SELECT COALESCE(SUM(total), 0) FROM sales x WHERE x.company_id = ps.company_id AND x.pos_session_id = ps.id AND x.deleted = 0 AND x.status = 'confirmada') AS sales_total,
          (SELECT COUNT(*) FROM sales x WHERE x.company_id = ps.company_id AND x.pos_session_id = ps.id AND x.deleted = 0 AND x.status = 'confirmada') AS sales_count
-       FROM pos_sessions ps WHERE ps.company_id = ? AND ps.deleted = 0 AND (? IS NULL OR ps.status = ?)
+       FROM pos_sessions ps WHERE ps.company_id = ? AND ps.deleted = 0
+         AND (? IS NULL OR ps.status = ?)
+         AND (? IS NULL OR ps.terminal = ?)
        ORDER BY ps.opened_at DESC LIMIT ?`,
       u.company_id,
       a.status ?? null,
       a.status ?? null,
+      a.terminal ?? null,
+      a.terminal ?? null,
       limit(a.limit, 30, 200),
     );
   },
@@ -559,12 +579,92 @@ function prepareAll(u: AuthUser, changes: { table: string; row: Record<string, u
   return prepared;
 }
 
+/** Evita ventas que superen las existencias operativas por bodega/sede. */
+async function assertSaleStock(u: AuthUser, prepared: PreparedRow[], changes: { table: string; row: Record<string, unknown> }[]) {
+  type Need = { productId: string; warehouseId: string | null; siteId: string | null; qty: number };
+  const needs = new Map<string, Need>();
+  for (let i = 0; i < prepared.length; i++) {
+    const p = prepared[i];
+    if (p.table !== "stock_moves") continue;
+    const input = (changes[i]?.row ?? {}) as Row;
+    if (input.deleted || p.values.deleted) continue;
+    const kind = String(p.values.kind ?? "");
+    if (kind !== "venta" && kind !== "pedido") continue;
+    const qty = Number(p.values.qty || 0);
+    if (qty >= 0) continue;
+    const productId = String(p.values.product_id || "");
+    if (!productId) continue;
+    const warehouseId = p.values.warehouse_id ? String(p.values.warehouse_id) : null;
+    const siteId = p.values.site_id ? String(p.values.site_id) : null;
+    const key = `${warehouseId ?? ""}|${siteId ?? ""}|${productId}`;
+    const prev = needs.get(key);
+    if (prev) prev.qty += -qty;
+    else needs.set(key, { productId, warehouseId, siteId, qty: -qty });
+  }
+  if (!needs.size) return;
+
+  const ids = [...new Set([...needs.values()].map((n) => n.productId))];
+  const names = new Map<string, string>();
+  if (ids.length) {
+    const rows = await all<Row>(
+      `SELECT id, name FROM products WHERE company_id = ? AND deleted = 0 AND id IN (${ids.map(() => "?").join(",")})`,
+      u.company_id,
+      ...ids,
+    );
+    for (const r of rows) names.set(String(r.id), String(r.name ?? "Producto"));
+  }
+
+  for (const need of needs.values()) {
+    let available = 0;
+    if (need.warehouseId) {
+      const r = await one<{ q: number }>(
+        "SELECT COALESCE(qty,0) AS q FROM warehouse_stocks WHERE company_id = ? AND warehouse_id = ? AND product_id = ? AND deleted = 0",
+        u.company_id,
+        need.warehouseId,
+        need.productId,
+      );
+      available = Number(r?.q ?? 0);
+    } else if (need.siteId) {
+      const r = await one<{ q: number }>(
+        "SELECT COALESCE(SUM(qty),0) AS q FROM warehouse_stocks WHERE company_id = ? AND site_id = ? AND product_id = ? AND deleted = 0",
+        u.company_id,
+        need.siteId,
+        need.productId,
+      );
+      available = Number(r?.q ?? 0);
+    } else {
+      const r = await one<{ q: number }>(
+        "SELECT COALESCE(SUM(qty),0) AS q FROM warehouse_stocks WHERE company_id = ? AND product_id = ? AND deleted = 0",
+        u.company_id,
+        need.productId,
+      );
+      available = Number(r?.q ?? 0);
+    }
+    if (need.qty > available + 1e-6) {
+      const name = names.get(need.productId) ?? "Producto";
+      throw gqlError(`Stock insuficiente para ${name}: disponible ${available}, solicitado ${need.qty}`);
+    }
+  }
+}
+
+/** Asigna una nueva revisión de sync a una fila escrita con SQL directo, para que los POS la reciban en su próximo pull. */
+async function bump(companyId: string, table: string, ...ids: string[]) {
+  for (const id of ids) {
+    if (!id) continue;
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO sync_counter (company_id, value) VALUES (?, 1) ON CONFLICT(company_id) DO UPDATE SET value = value + 1").bind(companyId),
+      env.DB.prepare(`UPDATE ${table} SET rev = (SELECT value FROM sync_counter WHERE company_id = ?) WHERE id = ? AND company_id = ?`).bind(companyId, id, companyId),
+    ]);
+  }
+}
+
 const Mutation: Record<string, R> = {
   saveRecords: async (_s, a, ctx) => {
     const u = requireUser(ctx.user);
     if (ctx._saved) throw gqlError("Sólo se permite un saveRecords por solicitud");
     ctx._saved = true;
     const prepared = prepareAll(u, a.changes);
+    await assertSaleStock(u, prepared, a.changes);
     // Capture old stock_moves before upsert so we can compute deltas correctly.
     const oldMoves = new Map<string, Row | null>();
     for (const c of a.changes) {
@@ -582,44 +682,52 @@ const Mutation: Record<string, R> = {
       throw gqlError("Error interno al guardar. " + msg.slice(0, 120), "INTERNAL");
     }
     // Sync stock_moves -> warehouse_stocks (create/update)
-    for (let i = 0; i < prepared.length; i++) {
-      const p = prepared[i];
-      const inputRow = (a.changes[i]?.row ?? {}) as Row;
-      if (p.table !== "stock_moves") continue;
-      const whId = p.values["warehouse_id"] as string | null;
-      const prodId = p.values["product_id"] as string | null;
-      const qtyVal = Number(p.values["qty"] || 0);
-      if (!prodId) continue;
-      const now = nowIso();
-      const applyWs = async (warehouseId: string, productId: string, delta: number) => {
-        if (!warehouseId || !productId || !delta) return;
-        const existing = await one<Row>(
-          "SELECT id FROM warehouse_stocks WHERE company_id = ? AND warehouse_id = ? AND product_id = ? AND deleted = 0",
-          u.company_id, warehouseId, productId,
-        );
-        if (existing) {
-          await env.DB.prepare(
-            "UPDATE warehouse_stocks SET qty = qty + ?, updated_at = ?, updated_by = ? WHERE id = ? AND company_id = ?",
-          ).bind(delta, now, u.id, existing.id, u.company_id).run();
-        } else {
-          const anyWs = await one<{ c: number }>("SELECT COUNT(*) AS c FROM warehouse_stocks WHERE company_id = ? AND product_id = ? AND deleted = 0", u.company_id, productId);
-          const initialQty = (anyWs?.c ?? 0) === 0
-            ? ((await one<{ q: number }>("SELECT COALESCE(SUM(qty),0) AS q FROM stock_moves WHERE company_id = ? AND product_id = ? AND deleted = 0", u.company_id, productId))?.q ?? delta)
-            : delta;
-          const wsId = crypto.randomUUID();
-          const prod = await one<Row>("SELECT min_stock, site_id FROM products WHERE id = ? AND company_id = ?", productId, u.company_id);
-          const wh = await one<Row>("SELECT site_id FROM warehouses WHERE id = ? AND company_id = ?", warehouseId, u.company_id);
-          await env.DB.prepare(
-            "INSERT INTO warehouse_stocks (id, company_id, site_id, warehouse_id, product_id, qty, min_qty, active, created_at, updated_at, updated_by, deleted, rev) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)",
-          ).bind(wsId, u.company_id, wh?.site_id ?? prod?.site_id ?? null, warehouseId, productId, initialQty, Number(prod?.min_stock ?? 0), 1, now, now, u.id, 0).run();
-        }
-      };
+    try {
+      for (let i = 0; i < prepared.length; i++) {
+        const p = prepared[i];
+        const inputRow = (a.changes[i]?.row ?? {}) as Row;
+        if (p.table !== "stock_moves") continue;
+        const whId = p.values["warehouse_id"] as string | null;
+        const prodId = p.values["product_id"] as string | null;
+        const qtyVal = Number(p.values["qty"] || 0);
+        if (!prodId) continue;
+        const now = nowIso();
+        const applyWs = async (warehouseId: string, productId: string, delta: number) => {
+          if (!warehouseId || !productId || !delta) return;
+          const existing = await one<Row>(
+            "SELECT id FROM warehouse_stocks WHERE company_id = ? AND warehouse_id = ? AND product_id = ? AND deleted = 0",
+            u.company_id, warehouseId, productId,
+          );
+          if (existing) {
+            await env.DB.prepare(
+              "UPDATE warehouse_stocks SET qty = qty + ?, updated_at = ?, updated_by = ? WHERE id = ? AND company_id = ?",
+            ).bind(delta, now, u.id, existing.id, u.company_id).run();
+            await bump(u.company_id, "warehouse_stocks", String(existing.id));
+          } else {
+            const anyWs = await one<{ c: number }>("SELECT COUNT(*) AS c FROM warehouse_stocks WHERE company_id = ? AND product_id = ? AND deleted = 0", u.company_id, productId);
+            const initialQty = (anyWs?.c ?? 0) === 0
+              ? ((await one<{ q: number }>("SELECT COALESCE(SUM(qty),0) AS q FROM stock_moves WHERE company_id = ? AND product_id = ? AND deleted = 0", u.company_id, productId))?.q ?? delta)
+              : delta;
+            const wsId = crypto.randomUUID();
+            const prod = await one<Row>("SELECT min_stock FROM products WHERE id = ? AND company_id = ?", productId, u.company_id);
+            const wh = await one<Row>("SELECT site_id FROM warehouses WHERE id = ? AND company_id = ?", warehouseId, u.company_id);
+            await env.DB.prepare(
+              "INSERT INTO warehouse_stocks (id, company_id, site_id, warehouse_id, product_id, qty, min_qty, active, created_at, updated_at, updated_by, deleted, rev) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)",
+            ).bind(wsId, u.company_id, wh?.site_id ?? null, warehouseId, productId, initialQty, Number(prod?.min_stock ?? 0), 1, now, now, u.id, 0).run();
+            await bump(u.company_id, "warehouse_stocks", wsId);
+          }
+        };
 
-      const old = inputRow.id ? oldMoves.get(String(inputRow.id)) : null;
-      if (old && !old.deleted) {
-        if (old.warehouse_id && old.product_id) await applyWs(String(old.warehouse_id), String(old.product_id), -Number(old.qty || 0));
+        const old = inputRow.id ? oldMoves.get(String(inputRow.id)) : null;
+        const oldSyncedLocally = String(old?.notes ?? "").includes("ws_synced=1");
+        if (old && !old.deleted && !oldSyncedLocally) {
+          if (old.warehouse_id && old.product_id) await applyWs(String(old.warehouse_id), String(old.product_id), -Number(old.qty || 0));
+        }
+        // El POS ya descontó warehouse_stocks localmente; el backend sólo audita el movimiento.
+        if (whId && !String(p.values.notes ?? "").includes("ws_synced=1")) await applyWs(whId, prodId, qtyVal);
       }
-      if (whId) await applyWs(whId, prodId, qtyVal);
+    } catch (e: any) {
+      throw gqlError("Error sincronizando inventario: " + String(e?.message || e).slice(0, 140), "INTERNAL");
     }
     return prepared.map((p) => p.values.id);
   },
@@ -637,6 +745,8 @@ const Mutation: Record<string, R> = {
           await env.DB.prepare(
             "UPDATE warehouse_stocks SET qty = qty + ?, updated_at = ?, updated_by = ? WHERE company_id = ? AND warehouse_id = ? AND product_id = ? AND deleted = 0",
           ).bind(delta, now, u.id, u.company_id, mv.warehouse_id, mv.product_id).run();
+          const wsRow = await one<Row>("SELECT id FROM warehouse_stocks WHERE company_id = ? AND warehouse_id = ? AND product_id = ? AND deleted = 0", u.company_id, mv.warehouse_id, mv.product_id);
+          if (wsRow) await bump(u.company_id, "warehouse_stocks", String(wsRow.id));
         }
       }
     }
@@ -670,6 +780,7 @@ const Mutation: Record<string, R> = {
       for (const [k, v] of Object.entries(extra)) { fields.push(`${k} = ?`); binds.push(v); }
       binds.push(a.id, u.company_id);
       await env.DB.prepare(`UPDATE requisitions SET ${fields.join(", ")} WHERE id = ? AND company_id = ?`).bind(...binds).run();
+      await bump(u.company_id, "requisitions", String(a.id));
     };
 
     const ensureWs = async (warehouseId: string, productId: string) => {
@@ -684,6 +795,7 @@ const Mutation: Record<string, R> = {
       const wh = await one<Row>("SELECT site_id FROM warehouses WHERE id = ? AND company_id = ?", warehouseId, u.company_id);
       await env.DB.prepare("INSERT INTO warehouse_stocks (id, company_id, site_id, warehouse_id, product_id, qty, min_qty, active, created_at, updated_at, updated_by, deleted, rev) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)")
         .bind(id, u.company_id, wh?.site_id ?? null, warehouseId, productId, initialQty, Number(prod?.min_stock ?? 0), 1, now, now, u.id, 0).run();
+      await bump(u.company_id, "warehouse_stocks", id);
       return { id, qty: initialQty };
     };
 
@@ -698,14 +810,27 @@ const Mutation: Record<string, R> = {
       for (const ln of lines) {
         const qty = Number(ln.qty_dispatched || ln.qty_requested || 0);
         if (qty <= 0) continue;
+        const ws = await one<Row>("SELECT qty FROM warehouse_stocks WHERE company_id = ? AND warehouse_id = ? AND product_id = ? AND deleted = 0", u.company_id, req.from_warehouse_id, ln.product_id);
+        const available = Number(ws?.qty ?? 0);
+        if (qty > available) {
+          const prod = await one<Row>("SELECT name, sku FROM products WHERE id = ? AND company_id = ?", ln.product_id, u.company_id);
+          throw gqlError(`Stock insuficiente para ${prod?.name ?? ln.product_id}: disponible ${available}, solicitado ${qty}.`);
+        }
+      }
+      for (const ln of lines) {
+        const qty = Number(ln.qty_dispatched || ln.qty_requested || 0);
+        if (qty <= 0) continue;
         await env.DB.prepare("UPDATE requisition_lines SET qty_dispatched = ?, updated_at = ?, updated_by = ? WHERE id = ? AND company_id = ?")
           .bind(qty, now, u.id, ln.id, u.company_id).run();
+        await bump(u.company_id, "requisition_lines", String(ln.id));
         const ws = await ensureWs(req.from_warehouse_id, ln.product_id);
         await env.DB.prepare("UPDATE warehouse_stocks SET qty = qty - ?, updated_at = ?, updated_by = ? WHERE id = ? AND company_id = ?")
           .bind(qty, now, u.id, ws.id, u.company_id).run();
+        await bump(u.company_id, "warehouse_stocks", String(ws.id));
         const moveId = crypto.randomUUID();
         await env.DB.prepare("INSERT INTO stock_moves (id, company_id, product_id, qty, kind, ref_id, date, unit_cost, notes, site_id, warehouse_id, warehouse_to_id, created_at, updated_at, updated_by, deleted, rev) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)")
           .bind(moveId, u.company_id, ln.product_id, -qty, "traslado_salida", req.id, today(), 0, `Despacho requisición ${req.id.slice(0,8)}`, req.site_id ?? null, req.from_warehouse_id, req.to_warehouse_id, now, now, u.id, 0).run();
+        await bump(u.company_id, "stock_moves", moveId);
       }
       await setStatus("dispatched", { dispatched_at: now });
     } else if (action === "receive") {
@@ -715,12 +840,15 @@ const Mutation: Record<string, R> = {
         if (qty <= 0) continue;
         await env.DB.prepare("UPDATE requisition_lines SET qty_received = ?, updated_at = ?, updated_by = ? WHERE id = ? AND company_id = ?")
           .bind(qty, now, u.id, ln.id, u.company_id).run();
+        await bump(u.company_id, "requisition_lines", String(ln.id));
         const ws = await ensureWs(req.to_warehouse_id, ln.product_id);
         await env.DB.prepare("UPDATE warehouse_stocks SET qty = qty + ?, updated_at = ?, updated_by = ? WHERE id = ? AND company_id = ?")
           .bind(qty, now, u.id, ws.id, u.company_id).run();
+        await bump(u.company_id, "warehouse_stocks", String(ws.id));
         const moveId = crypto.randomUUID();
         await env.DB.prepare("INSERT INTO stock_moves (id, company_id, product_id, qty, kind, ref_id, date, unit_cost, notes, site_id, warehouse_id, warehouse_to_id, created_at, updated_at, updated_by, deleted, rev) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)")
           .bind(moveId, u.company_id, ln.product_id, qty, "traslado_entrada", req.id, today(), 0, `Recepción requisición ${req.id.slice(0,8)}`, req.site_id ?? null, req.to_warehouse_id, req.from_warehouse_id, now, now, u.id, 0).run();
+        await bump(u.company_id, "stock_moves", moveId);
       }
       await setStatus("received", { received_at: now });
     } else if (action === "cancel") {
@@ -751,7 +879,11 @@ const Mutation: Record<string, R> = {
     // Mismo mensaje exista o no el correo sería ideal, pero el usuario necesita saber que ya tiene cuenta.
     if (await one("SELECT id FROM users WHERE email = ?", email)) throw gqlError("Ya existe una cuenta con ese correo. Inicia sesión.", "CONFLICT");
     const s = (v: unknown, n = 60) => (v == null || String(v).trim() === "" ? null : String(v).trim().slice(0, n));
-    await createTenant({ name: companyName, nit: s(input.nit, 20), city: s(input.city), phone: s(input.phone, 20), email }, { name, email, password: input.password });
+    const storeCount = Math.max(1, Math.min(50, Number(input.storeCount ?? 1) || 1));
+    await createTenant(
+      { name: companyName, nit: s(input.nit, 20), city: s(input.city), phone: s(input.phone, 20), email, address: s(input.address, 120), businessType: s(input.businessType, 40), hasCedi: !!input.hasCedi, storeCount },
+      { name, email, password: input.password },
+    );
     const { token, expiresAt } = await login(email, input.password, ctx.deviceId);
     const user = await authenticate(token);
     return { token, expiresAt, me: await meOf(user!) };
@@ -957,6 +1089,49 @@ const Mutation: Record<string, R> = {
     await env.DB.batch(stmts);
     return one(`${USER_SELECT} WHERE u.id = ?`, id);
   },
+  deleteCompany: async (_s, { id }, ctx) => {
+    requirePlatform(ctx.user, 'owner');
+    const company = await one<Row>('SELECT id, name FROM companies WHERE id = ?', id);
+    if (!company) throw gqlError('Empresa no encontrada', 'NOT_FOUND');
+    const tables = await all<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND sql LIKE '%company_id%' ORDER BY name",
+    );
+    const names = tables.map((t) => t.name).filter((n) => n !== 'companies');
+    const userIds = (await all<{ id: string }>('SELECT id FROM users WHERE company_id = ?', id)).map((r) => r.id);
+    const stmts: any[] = [env.DB.prepare('PRAGMA defer_foreign_keys=ON')];
+    for (const uid of userIds) stmts.push(env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(uid));
+    for (const n of names) stmts.push(env.DB.prepare(`DELETE FROM ${n} WHERE company_id = ?`).bind(id));
+    stmts.push(env.DB.prepare('DELETE FROM sync_counter WHERE company_id = ?').bind(id));
+    stmts.push(env.DB.prepare('DELETE FROM companies WHERE id = ?').bind(id));
+    for (let i = 0; i < stmts.length; i += 80) {
+      const chunk = stmts.slice(i, i + 80);
+      if (i > 0) chunk.unshift(env.DB.prepare('PRAGMA defer_foreign_keys=ON'));
+      await env.DB.batch(chunk);
+    }
+    return true;
+  },
+  switchCompany: async (_s, { companyId }, ctx) => {
+    const u = requirePlatform(ctx.user, 'owner');
+    const company = await one<Row>('SELECT id, name, active FROM companies WHERE id = ?', companyId);
+    if (!company || !company.active) throw gqlError('Empresa no encontrada o inactiva', 'NOT_FOUND');
+    const target = await one<Row & { password_hash: string }>(
+      "SELECT u.*, c.name AS company_name FROM users u JOIN companies c ON c.id=u.company_id WHERE u.company_id=? AND u.active=1 AND u.role='admin' ORDER BY u.created_at ASC LIMIT 1",
+      companyId,
+    );
+    if (!target) throw gqlError('La empresa no tiene un usuario admin activo');
+    const token = randomHex(32);
+    const now = nowIso();
+    const expiresAt = new Date(Date.now() + 30 * 86_400_000).toISOString();
+    await env.DB.batch([
+      env.DB.prepare('INSERT INTO sessions (id, user_id, token_hash, device_id, expires_at) VALUES (?, ?, ?, ?, ?)').bind(
+        uuid(), target.id, await sha256Hex(token), `platform:${u.id}`.slice(0, 64), expiresAt,
+      ),
+      env.DB.prepare('UPDATE users SET last_login_at = ?, failed_logins = 0, locked_until = NULL WHERE id = ?').bind(now, target.id),
+    ]);
+    const user = await authenticate(token);
+    if (!user) throw gqlError('No se pudo iniciar la sesión en la empresa');
+    return { token, expiresAt, me: await meOf(user) };
+  },
   updateCompany: async (_s, { input }, ctx) => {
     const u = requireUser(ctx.user, ["admin"]);
     const map: Record<string, string> = { name: "name", nit: "nit", address: "address", city: "city", phone: "phone", email: "email", receiptFooter: "receipt_footer" };
@@ -1034,6 +1209,17 @@ export const resolvers: Record<string, Record<string, R>> = {
       ))?.q ?? 0;
     },
     category: (p, _a, ctx) => byId(ctx, "categories", p.category_id),
+    tags: async (p, _a, ctx) => {
+      const cid = ctx.user!.company_id;
+      return all(
+        `SELECT t.* FROM tags t JOIN product_tags pt ON pt.tag_id = t.id AND pt.company_id = t.company_id AND pt.deleted = 0
+         WHERE pt.product_id = ? AND t.company_id = ? AND t.deleted = 0 ORDER BY t.name`,
+        p.id, cid,
+      );
+    },
+  },
+  ProductTag: {
+    tag: (pt, _a, ctx) => byId(ctx, "tags", pt.tag_id),
   },
   Sale: {
     paid: async (s, _a, ctx) => s.paid ?? sumPaid(await children(ctx, "payments", "sale_id", s.id)),

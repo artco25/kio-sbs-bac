@@ -115,26 +115,31 @@ export function mountProvision(app: Express) {
  * El llamador valida datos, unicidad del correo y la contraseña.
  */
 export async function createTenant(
-  company: { name: string; nit?: string | null; city?: string | null; phone?: string | null; email?: string | null },
+  company: { name: string; nit?: string | null; city?: string | null; phone?: string | null; email?: string | null; address?: string | null; businessType?: string | null; hasCedi?: boolean; storeCount?: number },
   admin: { name: string; email: string; password: string },
   demo = false,
 ) {
   const companyId = uuid();
   const adminId = uuid();
   const sysUser = { id: adminId, company_id: companyId, role: "admin" as Role };
+  const now = nowIso();
+  const settings = JSON.stringify({ businessType: company.businessType ?? null, hasCedi: !!company.hasCedi, storeCount: company.storeCount ?? 1, onboardingAt: now });
   // id determinista por año y empresa (pp-<año>-<empresa>): dos equipos no pueden crear dos juegos de parámetros del mismo año.
   const rows: [string, Record<string, unknown>][] = [["payroll_params", { id: `pp-${PAYROLL_2026.year}-${companyId}`, ...PAYROLL_2026 }]];
   if (demo) rows.push(...demoRows(adminId));
   const prepared = rows.map(([t, r]) => prepareChange(sysUser, t, r)).filter((r): r is PreparedRow => "values" in r);
 
-  await env.DB.batch([
-    env.DB.prepare("INSERT INTO companies (id, name, nit, city, phone, email) VALUES (?, ?, ?, ?, ?, ?)").bind(
+  const storeCount = Math.max(1, Math.min(50, Number(company.storeCount ?? 1) || 1));
+  const stmts: any[] = [
+    env.DB.prepare("INSERT INTO companies (id, name, nit, address, city, phone, email, settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind(
       companyId,
       company.name,
       company.nit ?? null,
+      company.address ?? null,
       company.city ?? null,
       company.phone ?? null,
       company.email ?? null,
+      settings,
     ),
     env.DB.prepare("INSERT INTO sync_counter (company_id, value) VALUES (?, 0)").bind(companyId),
     env.DB.prepare("INSERT INTO users (id, company_id, name, email, password_hash, role) VALUES (?, ?, ?, ?, ?, 'admin')").bind(
@@ -144,7 +149,30 @@ export async function createTenant(
       admin.email,
       await hashPassword(admin.password),
     ),
-    ...upsertStatements(env.DB, companyId, prepared),
-  ]);
+  ];
+
+  const mkId = () => uuid();
+  const bType = company.businessType ?? 'full';
+  for (let i = 0; i < storeCount; i++) {
+    const siteId = mkId();
+    const whId = mkId();
+    const name = i === 0 ? 'Sede principal' : `Tienda ${i + 1}`;
+    const code = `SEDE-${String(i + 1).padStart(2, '0')}`;
+    stmts.push(env.DB.prepare("INSERT INTO sites (id, company_id, name, code, kind, business_type, catalog_mode, address, city, active, is_default, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(siteId, companyId, name, code, 'store', bType, 'mixed', company.address ?? null, company.city ?? null, 1, i === 0 ? 1 : 0, 'signup'));
+    stmts.push(env.DB.prepare("INSERT INTO warehouses (id, company_id, site_id, name, code, kind, active, is_default, updated_by) VALUES (?,?,?,?,?,?,?,?,?)")
+      .bind(whId, companyId, siteId, i === 0 ? 'Bodega principal' : `Bodega ${name}`, `BOD-${String(i + 1).padStart(2, '0')}`, 'store', 1, i === 0 ? 1 : 0, 'signup'));
+  }
+  if (company.hasCedi) {
+    const siteId = mkId();
+    const whId = mkId();
+    stmts.push(env.DB.prepare("INSERT INTO sites (id, company_id, name, code, kind, business_type, catalog_mode, address, city, active, is_default, updated_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+      .bind(siteId, companyId, 'CEDI', 'CEDI-01', 'cedi', bType, 'mixed', company.address ?? null, company.city ?? null, 1, 0, 'signup'));
+    stmts.push(env.DB.prepare("INSERT INTO warehouses (id, company_id, site_id, name, code, kind, active, is_default, updated_by) VALUES (?,?,?,?,?,?,?,?,?)")
+      .bind(whId, companyId, siteId, 'Bodega CEDI', 'BOD-CEDI', 'main', 1, 0, 'signup'));
+  }
+
+  stmts.push(...upsertStatements(env.DB, companyId, prepared));
+  for (let i = 0; i < stmts.length; i += 80) await env.DB.batch(stmts.slice(i, i + 80));
   return { companyId, adminId, rows: prepared.length };
 }
