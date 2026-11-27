@@ -13,6 +13,12 @@ export interface Env {
   ALLOW_SIGNUP?: string;
   /** Días de vigencia del token de sesión (por defecto 30). */
   SESSION_DAYS?: string;
+  /** "slave" = este backend valida su licencia contra un maestro; otro valor = maestro/independiente. */
+  MODE?: string;
+  /** URL del backend maestro (sólo esclavo). */
+  MASTER_URL?: string;
+  /** Llave de licencia emitida por el maestro (sólo esclavo; mejor como secreto). */
+  LICENSE_KEY?: string;
 }
 
 /** Bindings del Worker accesibles desde cualquier handler de Express. */

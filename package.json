@@ -11,6 +11,7 @@
         "seed:dev": "bash scripts/dev-seed.sh",
         "password:dev": "node scripts/dev-password.mjs",
         "typecheck": "tsc --noEmit",
+        "setup": "node scripts/setup.mjs",
         "db:migrate": "wrangler d1 migrations apply kio-sbs --local -c wrangler.api.jsonc",
         "db:migrate:remote": "wrangler d1 migrations apply kio-sbs --remote -c wrangler.api.jsonc",
         "deploy:api": "wrangler deploy -c wrangler.api.jsonc",

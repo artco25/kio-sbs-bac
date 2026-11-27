@@ -1,4 +1,4 @@
-import { authenticate, gqlError, login, normEmail, requireUser, validatePassword, type AuthUser } from "../shared/auth";
+import { authenticate, gqlError, licenseState, login, normEmail, requireUser, validatePassword, type AuthUser } from "../shared/auth";
 import { parseJson, SUITE_KEYS, SUITES } from "../shared/suites";
 import { createTenant } from "./provision";
 import { hashPassword, nowIso, randomHex, sha256Hex, uuid, verifyPassword } from "../shared/crypto";
@@ -63,6 +63,70 @@ function requirePlatform(user: AuthUser | null, min: 'viewer' | 'admin' | 'owner
   const rank = u.platform_role ? (PLATFORM_RANK[u.platform_role] ?? 0) : 0;
   if (rank < PLATFORM_RANK[min]) throw gqlError('No tienes acceso a la plataforma', 'FORBIDDEN');
   return u;
+}
+
+
+// ------------------------------------------------------------------ Licencias (plataforma)
+
+const newLicenseKey = () => {
+  const h = randomHex(12).toUpperCase();
+  return `KIO-${h.slice(0, 6)}-${h.slice(6, 12)}-${h.slice(12, 18)}-${h.slice(18, 24)}`;
+};
+
+const licenseOut = async (r: Row) => {
+  const state = licenseState({ status: String(r.status), starts_at: (r.starts_at as string) ?? null, ends_at: (r.ends_at as string) ?? null });
+  let devicesUsed: number | null = null;
+  let usersUsed: number | null = null;
+  if (r.company_id) {
+    devicesUsed = (await one<{ n: number }>("SELECT COUNT(*) AS n FROM devices WHERE company_id = ?", r.company_id))?.n ?? 0;
+    usersUsed = (await one<{ n: number }>("SELECT COUNT(*) AS n FROM users WHERE company_id = ? AND active = 1 AND platform_role IS NULL", r.company_id))?.n ?? 0;
+  } else {
+    const usage = parseJson<{ devices?: number; users?: number }>(r.last_usage, {});
+    devicesUsed = usage.devices ?? null;
+    usersUsed = usage.users ?? null;
+  }
+  return {
+    ...r,
+    modules: r.modules ? parseJson<string[]>(r.modules, []) : null,
+    state: state ? state.code.replace("LICENSE_", "").toLowerCase() : "active",
+    state_message: state?.message ?? null,
+    devices_used: devicesUsed,
+    users_used: usersUsed,
+  };
+};
+
+const LICENSE_SELECT = `SELECT l.*, c.name AS company_name FROM licenses l LEFT JOIN companies c ON c.id = l.company_id`;
+
+function licenseFields(input: any) {
+  const date = (v: unknown, label: string) => {
+    if (v == null || v === "") return null;
+    if (!isDate(v)) throw gqlError(`${label} inválida (usa AAAA-MM-DD)`);
+    return v;
+  };
+  const int = (v: unknown, label: string) => {
+    if (v == null || v === "") return null;
+    const n = Math.trunc(Number(v));
+    if (!Number.isFinite(n) || n < 1 || n > 100000) throw gqlError(`${label} debe ser un número mayor a 0`);
+    return n;
+  };
+  const startsAt = date(input.startsAt, "La fecha de inicio");
+  const endsAt = date(input.endsAt, "La fecha de fin");
+  if (startsAt && endsAt && endsAt < startsAt) throw gqlError("La fecha de fin no puede ser anterior a la de inicio");
+  let modules: string | null = null;
+  if (Array.isArray(input.modules) && input.modules.length) {
+    const m = [...new Set(input.modules as string[])];
+    if (m.some((x) => !SUITE_KEYS.includes(x as never))) throw gqlError("Módulo no válido en la licencia");
+    modules = JSON.stringify(m);
+  }
+  return {
+    startsAt,
+    endsAt,
+    maxDevices: int(input.maxDevices, "El máximo de cajas"),
+    maxUsers: int(input.maxUsers, "El máximo de usuarios"),
+    modules,
+    notes: input.notes == null ? null : String(input.notes).slice(0, 500),
+    status: input.status === "suspended" ? "suspended" : "active",
+  };
 }
 
 // ------------------------------------------------------------------ Query
@@ -151,6 +215,11 @@ const Query: Record<string, R> = {
         FROM companies c
        ORDER BY c.created_at DESC
     `);
+  },
+  licenses: async (_s, _a, ctx) => {
+    requirePlatform(ctx.user, 'viewer');
+    const rows = await all(`${LICENSE_SELECT} ORDER BY l.created_at DESC`);
+    return Promise.all(rows.map(licenseOut));
   },
   platformUsers: async (_s, _a, ctx) => {
     requirePlatform(ctx.user, 'viewer');
@@ -864,6 +933,7 @@ const Mutation: Record<string, R> = {
     const { token, expiresAt } = await login(a.email, a.password, a.deviceId ?? ctx.deviceId);
     const user = await authenticate(token);
     if (!user) throw gqlError("No se pudo iniciar la sesión");
+    requireUser(user); // licencia suspendida/vencida → LICENSE_* (los dueños de plataforma entran siempre)
     return { token, expiresAt, me: await meOf(user) };
   },
   signup: async (_s, { input }, ctx) => {
@@ -960,6 +1030,10 @@ const Mutation: Record<string, R> = {
     if (!String(input.name ?? "").trim()) throw gqlError("El nombre es obligatorio");
     validatePassword(input.password);
     if (await one("SELECT id FROM users WHERE email = ?", email)) throw gqlError("Ya existe un usuario con ese correo", "CONFLICT");
+    if (u.license?.max_users != null) {
+      const n = await one<{ n: number }>("SELECT COUNT(*) AS n FROM users WHERE company_id = ? AND active = 1 AND platform_role IS NULL", u.company_id);
+      if ((n?.n ?? 0) >= u.license.max_users) throw gqlError(`Tu licencia permite ${u.license.max_users} usuario(s). Contacta a soporte para ampliarla.`, "LICENSE_LIMIT");
+    }
     let role = input.role;
     if (input.roleId) {
       const r = await one<{ base_role: string }>("SELECT base_role FROM roles WHERE id = ? AND company_id = ?", input.roleId, u.company_id);
@@ -1037,6 +1111,67 @@ const Mutation: Record<string, R> = {
     await env.DB.prepare("UPDATE devices SET site_id = ?, updated_at = ? WHERE id = ? AND company_id = ?")
       .bind(sid, nowIso(), id, u.company_id).run();
     return one("SELECT * FROM devices WHERE id = ? AND company_id = ?", id, u.company_id);
+  },
+  saveLicense: async (_s, { input }, ctx) => {
+    requirePlatform(ctx.user, 'admin');
+    const f = licenseFields(input);
+    const now = nowIso();
+    let id = input.id as string | undefined;
+    if (id) {
+      const cur = await one<{ id: string; kind: string }>("SELECT id, kind FROM licenses WHERE id = ?", id);
+      if (!cur) throw gqlError("Licencia no encontrada", "NOT_FOUND");
+      await env.DB.prepare(
+        `UPDATE licenses SET status = ?, starts_at = ?, ends_at = ?, max_devices = ?, max_users = ?, modules = ?, notes = ?,
+                customer = COALESCE(?, customer), license_key = CASE WHEN ? = 1 THEN ? ELSE license_key END, updated_at = ? WHERE id = ?`,
+      ).bind(f.status, f.startsAt, f.endsAt, f.maxDevices, f.maxUsers, f.modules, f.notes, input.customer ?? null, input.regenerateKey ? 1 : 0, newLicenseKey(), now, id).run();
+    } else {
+      const kind = input.kind === "remote" ? "remote" : "hosted";
+      if (kind === "hosted") {
+        if (!input.companyId || !(await one("SELECT id FROM companies WHERE id = ?", input.companyId))) throw gqlError("Selecciona una empresa válida", "NOT_FOUND");
+        if (await one("SELECT id FROM licenses WHERE company_id = ?", input.companyId)) throw gqlError("Esa empresa ya tiene licencia", "CONFLICT");
+      } else if (!String(input.customer ?? "").trim()) throw gqlError("Escribe el nombre del cliente");
+      id = uuid();
+      await env.DB.prepare(
+        `INSERT INTO licenses (id, kind, company_id, customer, license_key, status, starts_at, ends_at, max_devices, max_users, modules, notes, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(id, kind, kind === "hosted" ? input.companyId : null, kind === "remote" ? String(input.customer).trim().slice(0, 120) : null, newLicenseKey(), f.status, f.startsAt, f.endsAt, f.maxDevices, f.maxUsers, f.modules, f.notes, now, now).run();
+    }
+    return licenseOut((await one(`${LICENSE_SELECT} WHERE l.id = ?`, id))!);
+  },
+  setLicenseStatus: async (_s, { id, active }, ctx) => {
+    requirePlatform(ctx.user, 'admin');
+    const r = await env.DB.prepare("UPDATE licenses SET status = ?, updated_at = ? WHERE id = ?").bind(active ? "active" : "suspended", nowIso(), id).run();
+    if (!r.meta.changes) throw gqlError("Licencia no encontrada", "NOT_FOUND");
+    return licenseOut((await one(`${LICENSE_SELECT} WHERE l.id = ?`, id))!);
+  },
+  deleteLicense: async (_s, { id }, ctx) => {
+    requirePlatform(ctx.user, 'owner');
+    await env.DB.prepare("DELETE FROM licenses WHERE id = ?").bind(id).run();
+    return true;
+  },
+  /** Crea una empresa nueva en este backend con su administrador y su licencia (cliente alojado en el maestro). */
+  createLicensedCompany: async (_s, { input }, ctx) => {
+    requirePlatform(ctx.user, 'admin');
+    const email = normEmail(input.adminEmail);
+    const companyName = String(input.companyName ?? "").trim();
+    if (!companyName || companyName.length > 120) throw gqlError("Escribe el nombre de la empresa");
+    if (!String(input.adminName ?? "").trim()) throw gqlError("Escribe el nombre del administrador");
+    if (!EMAIL_RE.test(email)) throw gqlError("Correo del administrador inválido");
+    validatePassword(input.adminPassword);
+    if (await one("SELECT id FROM users WHERE email = ?", email)) throw gqlError("Ya existe un usuario con ese correo", "CONFLICT");
+    const f = licenseFields(input);
+    const s = (v: unknown, n = 60) => (v == null || String(v).trim() === "" ? null : String(v).trim().slice(0, n));
+    const { companyId } = await createTenant(
+      { name: companyName, nit: s(input.nit, 20), city: s(input.city), phone: s(input.phone, 20), email: s(input.email, 80) ?? email, storeCount: 1 },
+      { name: String(input.adminName).trim(), email, password: input.adminPassword },
+    );
+    const id = uuid();
+    const now = nowIso();
+    await env.DB.prepare(
+      `INSERT INTO licenses (id, kind, company_id, license_key, status, starts_at, ends_at, max_devices, max_users, modules, notes, created_at, updated_at)
+       VALUES (?, 'hosted', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(id, companyId, newLicenseKey(), f.status, f.startsAt, f.endsAt, f.maxDevices, f.maxUsers, f.modules, f.notes, now, now).run();
+    return licenseOut((await one(`${LICENSE_SELECT} WHERE l.id = ?`, id))!);
   },
   createPlatformUser: async (_s, { input }, ctx) => {
     const u = requirePlatform(ctx.user, 'admin');

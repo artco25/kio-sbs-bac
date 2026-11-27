@@ -55,14 +55,6 @@ ALTER TABLE companies ADD COLUMN settings TEXT NOT NULL DEFAULT '{}';
 -- Alcance por sede
 ALTER TABLE users ADD COLUMN site_id TEXT REFERENCES sites(id);
 ALTER TABLE devices ADD COLUMN site_id TEXT REFERENCES sites(id);
-ALTER TABLE pos_sessions ADD COLUMN site_id TEXT REFERENCES sites(id);
-ALTER TABLE sales ADD COLUMN site_id TEXT REFERENCES sites(id);
-ALTER TABLE sale_lines ADD COLUMN site_id TEXT REFERENCES sites(id);
-ALTER TABLE payments ADD COLUMN site_id TEXT REFERENCES sites(id);
-ALTER TABLE expenses ADD COLUMN site_id TEXT REFERENCES sites(id);
-ALTER TABLE stock_moves ADD COLUMN site_id TEXT REFERENCES sites(id);
-ALTER TABLE stock_moves ADD COLUMN warehouse_id TEXT REFERENCES warehouses(id);
-ALTER TABLE stock_moves ADD COLUMN warehouse_to_id TEXT REFERENCES warehouses(id);
 
 CREATE INDEX IF NOT EXISTS ix_users_site ON users(company_id, site_id);
 CREATE INDEX IF NOT EXISTS ix_devices_site ON devices(company_id, site_id);

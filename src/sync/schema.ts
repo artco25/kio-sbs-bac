@@ -80,6 +80,17 @@ const typeDefs = /* GraphQL */ `
 
 const DEVICE_ID_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
+/** Límite de equipos de la licencia: un equipo nuevo no se registra si ya se alcanzó el tope (cuentan los vistos en 30 días). */
+async function assertDeviceAllowed(u: NonNullable<Ctx["user"]>, d: Record<string, unknown> | undefined) {
+  const max = u.license?.max_devices;
+  if (max == null || u.platform_role || !d || typeof d.id !== "string") return;
+  const known = await env.DB.prepare("SELECT 1 AS x FROM devices WHERE id = ? AND company_id = ?").bind(d.id, u.company_id).first();
+  if (known) return;
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM devices WHERE company_id = ? AND COALESCE(last_sync_at, created_at) > ?").bind(u.company_id, since).first<{ n: number }>();
+  if ((n?.n ?? 0) >= max) throw gqlError(`Tu licencia permite ${max} caja(s)/equipo(s) y ya están en uso. Contacta a soporte para ampliarla.`, "LICENSE_LIMIT");
+}
+
 async function touchDevice(ctx: Ctx, d: Record<string, unknown> | undefined) {
   if (!d || typeof d.id !== "string" || !DEVICE_ID_RE.test(d.id)) return;
   const u = ctx.user!;
@@ -119,6 +130,7 @@ export const syncSchema = addResolvers(buildSchema(typeDefs), {
     },
     pull: async (_s, a, ctx) => {
       const u = requireUser(ctx.user);
+      await assertDeviceAllowed(u, a.device);
       const since = Math.max(0, Math.trunc(Number(a.since)) || 0);
       const result = await pullChanges(env.DB, u, since, Number(a.limit) || 500);
       await touchDevice(ctx, a.device);

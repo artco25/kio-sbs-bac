@@ -514,6 +514,63 @@ export const typeDefs = /* GraphQL */ `
     lastActivityAt: String
   }
 
+  type License {
+    id: ID!
+    "hosted = empresa en este backend · remote = backend esclavo que valida su llave aquí"
+    kind: String!
+    companyId: ID
+    companyName: String
+    customer: String
+    licenseKey: String!
+    status: String!
+    "active | suspended | expired | not_started"
+    state: String!
+    stateMessage: String
+    startsAt: String
+    endsAt: String
+    maxDevices: Int
+    maxUsers: Int
+    modules: [String!]
+    notes: String
+    devicesUsed: Int
+    usersUsed: Int
+    lastCheckAt: String
+    createdAt: String
+  }
+
+  input LicenseInput {
+    id: ID
+    kind: String
+    companyId: ID
+    customer: String
+    status: String
+    startsAt: String
+    endsAt: String
+    maxDevices: Int
+    maxUsers: Int
+    modules: [String!]
+    notes: String
+    regenerateKey: Boolean
+  }
+
+  input LicensedCompanyInput {
+    companyName: String!
+    nit: String
+    city: String
+    phone: String
+    email: String
+    adminName: String!
+    adminEmail: String!
+    adminPassword: String!
+    status: String
+    startsAt: String
+    endsAt: String
+    maxDevices: Int
+    maxUsers: Int
+    modules: [String!]
+    notes: String
+  }
+
   type Query {
     me: Me!
     company: Company!
@@ -531,6 +588,7 @@ export const typeDefs = /* GraphQL */ `
     requisition(id: ID!): Requisition
     platformCompanies: [PlatformCompany!]!
     platformUsers: [User!]!
+    licenses: [License!]!
 
     partners(search: String, customers: Boolean, suppliers: Boolean, withBalance: Boolean, limit: Int, offset: Int): PartnerPage!
     partner(id: ID!): Partner
@@ -650,6 +708,10 @@ export const typeDefs = /* GraphQL */ `
     updateUser(id: ID!, input: UserUpdate!): User!
     assignDeviceSite(id: ID!, siteId: ID): Device!
     updateCompany(input: CompanyInput!): Company!
+    saveLicense(input: LicenseInput!): License!
+    setLicenseStatus(id: ID!, active: Boolean!): License!
+    deleteLicense(id: ID!): Boolean!
+    createLicensedCompany(input: LicensedCompanyInput!): License!
     createPlatformUser(input: PlatformUserInput!): User!
     updatePlatformUser(id: ID!, input: PlatformUserUpdate!): User!
     "Solo super admin de plataforma: elimina empresa y datos relacionados"

@@ -2,9 +2,33 @@ import { GraphQLError } from "graphql";
 import { hashPassword, nowIso, randomHex, sha256Hex, uuid, verifyPassword } from "./crypto";
 import { env } from "./env";
 import { DEFAULT_SUITES, parseJson, type Perms, type SuiteKey } from "./suites";
+import { isSlave, slaveLicense } from "./license";
 import type { Role } from "./sync";
 
 export type PlatformRole = 'owner' | 'admin' | 'viewer';
+
+/** Licencia vigente de la empresa (null = empresa directa, sin límites). */
+export interface LicenseInfo {
+  status: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  max_devices: number | null;
+  max_users: number | null;
+  modules: SuiteKey[] | null;
+  /** Si no es null, la empresa no puede operar (suspendida, vencida o aún no iniciada). */
+  error: { code: string; message: string } | null;
+}
+
+/** Fecha de hoy en Colombia (UTC-5) como YYYY-MM-DD. */
+export const todayCo = () => new Date(Date.now() - 5 * 3_600_000).toISOString().slice(0, 10);
+
+export function licenseState(l: { status: string; starts_at: string | null; ends_at: string | null }) {
+  const today = todayCo();
+  if (l.status !== "active") return { code: "LICENSE_SUSPENDED", message: "La licencia de la empresa está suspendida. Contacta a soporte." };
+  if (l.starts_at && today < l.starts_at) return { code: "LICENSE_NOT_STARTED", message: `La licencia inicia el ${l.starts_at}.` };
+  if (l.ends_at && today > l.ends_at) return { code: "LICENSE_EXPIRED", message: `La licencia venció el ${l.ends_at}. Contacta a soporte para renovarla.` };
+  return null;
+}
 
 export interface AuthUser {
   id: string;
@@ -24,6 +48,7 @@ export interface AuthUser {
   suites: SuiteKey[];
   platform_role: PlatformRole | null;
   site_id: string | null;
+  license: LicenseInfo | null;
 }
 
 const MAX_FAILED = 5;
@@ -48,11 +73,13 @@ export async function authenticate(token: string | null): Promise<AuthUser | nul
   const now = nowIso();
   const row = await env.DB.prepare(
     `SELECT s.id AS session_id, s.device_id, s.last_seen_at, u.id, u.company_id, u.name, u.email, u.role, u.employee_id, u.pos_terminal,
-            u.platform_role, u.site_id, c.name AS company_name, u.role_id, r.name AS role_name, r.base_role, r.suites AS role_suites, r.permissions AS role_permissions
+            u.platform_role, u.site_id, c.name AS company_name, u.role_id, r.name AS role_name, r.base_role, r.suites AS role_suites, r.permissions AS role_permissions,
+            l.status AS lic_status, l.starts_at AS lic_starts, l.ends_at AS lic_ends, l.max_devices AS lic_max_devices, l.max_users AS lic_max_users, l.modules AS lic_modules
        FROM sessions s
        JOIN users u ON u.id = s.user_id
        JOIN companies c ON c.id = u.company_id
        LEFT JOIN roles r ON r.id = u.role_id AND r.company_id = u.company_id
+       LEFT JOIN licenses l ON l.company_id = u.company_id
       WHERE s.token_hash = ? AND s.expires_at > ? AND s.created_at > ? AND u.active = 1 AND c.active = 1`,
   )
     .bind(await sha256Hex(token), now, new Date(Date.now() - ABSOLUTE_DAYS * 86_400_000).toISOString())
@@ -64,25 +91,56 @@ export async function authenticate(token: string | null): Promise<AuthUser | nul
       .bind(now, addDays(sessionDays()), row.session_id)
       .run();
   }
-  return withRole(row);
+  const user = withRole(row);
+  // Esclavo: la licencia viene del maestro y aplica a toda la instalación.
+  return isSlave() ? applyLicense(user, await slaveLicense()) : user;
 }
 
-type RawUser = Omit<AuthUser, "perms" | "suites"> & { base_role: Role | null; role_suites: string | null; role_permissions: string | null };
+type RawUser = Omit<AuthUser, "perms" | "suites" | "license"> & {
+  base_role: Role | null;
+  role_suites: string | null;
+  role_permissions: string | null;
+  lic_status?: string | null;
+  lic_starts?: string | null;
+  lic_ends?: string | null;
+  lic_max_devices?: number | null;
+  lic_max_users?: number | null;
+  lic_modules?: string | null;
+};
 
 /** Rol efectivo: el rol personalizado de la empresa (si tiene) define suites y permisos; si no, los del rol base. */
 export function withRole(row: RawUser & { last_seen_at?: string }): AuthUser {
-  const { last_seen_at: _a, base_role, role_suites, role_permissions, ...u } = row;
+  const { last_seen_at: _a, base_role, role_suites, role_permissions, lic_status, lic_starts, lic_ends, lic_max_devices, lic_max_users, lic_modules, ...u } = row;
   const role = (row.role_id && base_role) || u.role;
-  return {
-    ...u,
-    role,
-    perms: row.role_id && base_role ? parseJson<Perms>(role_permissions, {}) : null,
-    suites: row.role_id && base_role ? parseJson<SuiteKey[]>(role_suites, []) : DEFAULT_SUITES[role],
-  };
+  const license: LicenseInfo | null = lic_status
+    ? {
+        status: lic_status,
+        starts_at: lic_starts ?? null,
+        ends_at: lic_ends ?? null,
+        max_devices: lic_max_devices ?? null,
+        max_users: lic_max_users ?? null,
+        modules: lic_modules ? parseJson<SuiteKey[] | null>(lic_modules, null) : null,
+        error: licenseState({ status: lic_status, starts_at: lic_starts ?? null, ends_at: lic_ends ?? null }),
+      }
+    : null;
+  const suites = row.role_id && base_role ? parseJson<SuiteKey[]>(role_suites, []) : DEFAULT_SUITES[role];
+  return applyLicense(
+    { ...u, role, license: null, perms: row.role_id && base_role ? parseJson<Perms>(role_permissions, {}) : null, suites },
+    license,
+  );
+}
+
+/** Asigna la licencia y recorta las suites a los módulos licenciados (los dueños de plataforma no se restringen). */
+export function applyLicense(u: AuthUser, license: LicenseInfo | null): AuthUser {
+  u.license = license;
+  if (license?.modules && !u.platform_role) u.suites = u.suites.filter((x) => license.modules!.includes(x) || x === "sistema");
+  return u;
 }
 
 export function requireUser(user: AuthUser | null, roles?: Role[]): AuthUser {
   if (!user) throw gqlError("Sesión no válida o vencida", "UNAUTHENTICATED");
+  // Licencia suspendida/vencida: la empresa no opera (los dueños de plataforma sí pueden entrar a administrarla).
+  if (user.license?.error && !user.platform_role) throw gqlError(user.license.error.message, user.license.error.code);
   if (roles && !roles.includes(user.role)) throw gqlError("No tienes permiso para esta acción", "FORBIDDEN");
   return user;
 }

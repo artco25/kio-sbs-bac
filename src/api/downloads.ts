@@ -2,6 +2,7 @@
 // GET /downloads/release.json y /downloads/<archivo> se resuelven contra el admin (assets estáticos).
 import type express from "express";
 import { env } from "../shared/env";
+import { isSlave } from "../shared/license";
 
 const ALLOWED = /^(release\.json|kio-sbs-pos-[a-z0-9._-]+\.(tar\.gz|zip|exe|msi))$/i;
 
@@ -14,8 +15,10 @@ export function mountDownloads(app: express.Express, adminUrl: string) {
     }
     try {
       // workers.dev no permite fetch entre Workers de la misma cuenta: se usa el service binding.
-      const target = `${adminUrl.replace(/\/+$/, "")}/downloads/${file}`;
-      const r = env.ADMIN ? await env.ADMIN.fetch(target) : await fetch(target);
+      // Esclavo: las actualizaciones del POS se piden al maestro (una sola fuente de versiones).
+      const base = isSlave() && env.MASTER_URL ? env.MASTER_URL : adminUrl;
+      const target = `${base.replace(/\/+$/, "")}/downloads/${file}`;
+      const r = env.ADMIN && !isSlave() ? await env.ADMIN.fetch(target) : await fetch(target);
       const type = r.headers.get("content-type") ?? "";
       if (!r.ok || type.includes("text/html")) {
         res.status(404).json({ error: "No encontrado" });
