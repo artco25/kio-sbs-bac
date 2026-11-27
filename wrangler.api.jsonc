@@ -23,6 +23,8 @@
       "migrations_dir": "migrations"
     }
   ],
+  // Admin web (assets) para servir /downloads desde este mismo backend.
+  "services": [{ "binding": "ADMIN", "service": "kio-sbs" }],
   // Límite de intentos de login: 10 por minuto por IP+correo.
   "ratelimits": [
     { "name": "LOGIN_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }

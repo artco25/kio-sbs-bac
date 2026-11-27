@@ -2,6 +2,8 @@ import { env as cfEnv } from "cloudflare:workers";
 
 export interface Env {
   DB: D1Database;
+  /** Service binding al Worker del admin (assets estáticos: /downloads). */
+  ADMIN?: Fetcher;
   APP_NAME?: string;
   /** Orígenes permitidos separados por coma ("*" = cualquiera). */
   CORS_ORIGIN?: string;

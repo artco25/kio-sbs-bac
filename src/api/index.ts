@@ -5,6 +5,7 @@ import { createHandler } from "graphql-http/lib/use/express";
 import { nowIso } from "../shared/crypto";
 import { addResolvers, costLimit, createApp, snakeFieldResolver, type Ctx } from "../shared/http";
 import { syncSchema } from "../sync/schema";
+import { mountDownloads } from "./downloads";
 import { mountProvision } from "./provision";
 import { resolvers } from "./resolvers";
 import { typeDefs } from "./schema";
@@ -47,6 +48,7 @@ const syncHandler = createHandler<Ctx>({
 
 const app = createApp("kio-sbs-api", schema, (a) => {
   mountProvision(a);
+  mountDownloads(a, "https://kio-sbs.rmolina1529.workers.dev");
   a.get("/openapi.json", (_req, res) => res.json(openapi));
   a.get("/docs", (_req, res) => res.type("html").send(SWAGGER_HTML));
   a.all(["/sync", "/sync/graphql"], syncHandler);
