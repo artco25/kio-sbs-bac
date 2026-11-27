@@ -117,6 +117,18 @@ function cors(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+/** Errores de negocio (GraphQLError) se muestran; cualquier otro (SQL, bugs) se oculta al cliente. */
+export function hideInternalErrors(service: string) {
+  return (err: unknown) => {
+    const original = (err as GraphQLError).originalError;
+    if (original && !(original instanceof GraphQLError)) {
+      console.error(`[${service}]`, original);
+      return new GraphQLError("Error interno del servidor", { path: (err as GraphQLError).path, extensions: { code: "INTERNAL" } });
+    }
+    return err as GraphQLError;
+  };
+}
+
 export function createApp(service: string, schema: GraphQLSchema, setup?: (app: express.Express) => void) {
   const app = express();
   app.disable("x-powered-by");

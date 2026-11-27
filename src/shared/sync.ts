@@ -252,6 +252,44 @@ export function upsertStatements(DB: D1Database, companyId: string, rows: Prepar
   return stmts;
 }
 
+// Con las FK diferidas, D1 reporta la violación al confirmar la transacción como "internal error" genérico.
+const isFk = (e: unknown) => /FOREIGN KEY|internal error/i.test(String((e as Error)?.message ?? e));
+
+/**
+ * Escribe un lote; si una fila viola una llave foránea (p. ej. referencia a un registro que no existe en el servidor)
+ * se reintenta fila por fila para guardar las buenas y devolver las malas como rechazadas con su motivo,
+ * en vez de tumbar todo el envío una y otra vez.
+ */
+export async function writeRowsTolerant(DB: D1Database, companyId: string, rows: PreparedRow[]): Promise<Rejection[]> {
+  if (!rows.length) return [];
+  const defer = () => DB.prepare("PRAGMA defer_foreign_keys = ON");
+  try {
+    await DB.batch([defer(), ...upsertStatements(DB, companyId, rows)]);
+    return [];
+  } catch (e) {
+    if (!isFk(e)) throw e;
+  }
+  const rejected: Rejection[] = [];
+  let firstError: unknown;
+  for (const r of rows) {
+    try {
+      await DB.batch([defer(), ...upsertStatements(DB, companyId, [r])]);
+    } catch (e) {
+      if (!isFk(e)) throw e;
+      firstError ??= e;
+      const label = TABLES[r.table]?.label ?? r.table;
+      rejected.push({
+        table: r.table,
+        id: String(r.values.id ?? ""),
+        reason: `${label}: referencia a un registro que no existe en el servidor (cliente, producto, sede, bodega o venta). Descártalo o vuelve a sincronizar.`,
+      });
+    }
+  }
+  // Si fallaron TODAS (y eran varias) no es un problema de datos sino del servicio: se reintenta completo en el próximo ciclo.
+  if (rows.length > 1 && rejected.length === rows.length) throw firstError;
+  return rejected;
+}
+
 export async function writeRows(DB: D1Database, companyId: string, rows: PreparedRow[]) {
   if (!rows.length) return;
   await DB.batch(upsertStatements(DB, companyId, rows));

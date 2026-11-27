@@ -11,7 +11,7 @@ import {
   headRev,
   prepareChange,
   pullChanges,
-  upsertStatements,
+  writeRowsTolerant,
   type PreparedRow,
   type Rejection,
 } from "../shared/sync";
@@ -153,8 +153,9 @@ export const syncSchema = addResolvers(buildSchema(typeDefs), {
         if ("values" in r) accepted.push(r);
         else rejected.push(r);
       }
-      if (accepted.length) await env.DB.batch(upsertStatements(env.DB, u.company_id, accepted));
-      return { accepted: accepted.length, rejected, head: await headRev(env.DB, u.company_id), serverTime: nowIso() };
+      const fkRejected = await writeRowsTolerant(env.DB, u.company_id, accepted);
+      rejected.push(...fkRejected);
+      return { accepted: accepted.length - fkRejected.length, rejected, head: await headRev(env.DB, u.company_id), serverTime: nowIso() };
     },
   },
 });

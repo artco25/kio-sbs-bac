@@ -3,7 +3,7 @@ import { httpServerHandler } from "cloudflare:node";
 import { buildSchema, execute } from "graphql";
 import { createHandler } from "graphql-http/lib/use/express";
 import { nowIso } from "../shared/crypto";
-import { addResolvers, costLimit, createApp, snakeFieldResolver, type Ctx } from "../shared/http";
+import { addResolvers, costLimit, createApp, hideInternalErrors, snakeFieldResolver, type Ctx } from "../shared/http";
 import { syncSchema } from "../sync/schema";
 import { mountDownloads } from "./downloads";
 import { mountLicensing } from "./licensing";
@@ -45,6 +45,7 @@ const syncHandler = createHandler<Ctx>({
   },
   validationRules: (_req, _args, specified) => [...specified, costLimit(8, 12, 400)],
   execute: (args) => execute({ ...args, fieldResolver: snakeFieldResolver }),
+  formatError: hideInternalErrors("kio-sbs-api"),
 });
 
 const app = createApp("kio-sbs-api", schema, (a) => {
